@@ -17,6 +17,13 @@ tf.logging.set_verbosity(tf.logging.ERROR)
 # K.set_floatx('float16')
 print("Default float: {}".format(K.floatx()))
 
+def add_missingness(image_stack, prob_vis):
+    '''Mask out pixels of the image stack according to 1-prob_vis'''
+    rand_samps = np.random.random(size=(image_stack.reshape(image_stack.shape[0],-1)).shape)
+    vis_masks = 1.0*np.less(rand_samps, prob_vis).reshape(image_stack.shape)
+    masked_imgs = np.multiply(image_stack, vis_masks)
+    return masked_imgs
+
 def load_session():
     K.set_session(
         tf.Session(
@@ -121,12 +128,12 @@ def safe_chdir(path):
         pass
     os.chdir(path)
 
-def generate(p, ics, gcs, *args):
+def generate(p, ics, gcs, prob_vis, *args):
     import imageio
     import subprocess
     import datetime
-    inits = p.generate(np.array(ics),*args)
-    goals = p.generate(np.array(gcs),*args)
+    inits = add_missingness(p.generate(np.array(ics),*args), prob_vis)
+    goals = add_missingness(p.generate(np.array(gcs),*args), prob_vis)
     for noise_fn,output_dir in zip(noise_fns,output_dirs):
         inits = noise_fn(inits)
         goals = noise_fn(goals)
@@ -144,7 +151,7 @@ def generate(p, ics, gcs, *args):
 
 ################################################################
 
-def puzzle(type='mnist', width=3, height=3):
+def puzzle(type='mnist', width=3, height=3, prob_vis=1.0):
     import importlib
     p = importlib.import_module('latplan.puzzles.puzzle_{}'.format(type))
     p.setup()
@@ -152,9 +159,9 @@ def puzzle(type='mnist', width=3, height=3):
                                       lambda config: p.successors(config,width,height)),
                              instances)
     gcs = np.arange(width*height).reshape((1,width*height))
-    generate(p, ics, gcs, width, height)
+    generate(p, ics, gcs, prob_vis, width, height)
 
-def puzzle_longest(type='mnist', width=3, height=3):
+def puzzle_longest(type='mnist', width=3, height=3, prob_vis=1.0):
     global output_dirs
     output_dirs = ["longest"]
     import importlib
@@ -176,9 +183,9 @@ def puzzle_longest(type='mnist', width=3, height=3):
         [5,8,7,6,1,4,0,2,3],
     ]
     gcs = np.arange(width*height).reshape((1,width*height))
-    generate(p, ics, gcs, width, height)
+    generate(p, ics, gcs, prob_vis, width, height)
 
-def hanoi(disks=5, towers=3):
+def hanoi(disks=5, towers=3, prob_vis=1.0):
     import latplan.puzzles.hanoi as p
     p.setup()
     ics = [
@@ -188,9 +195,9 @@ def hanoi(disks=5, towers=3):
                             instances-1)
     ]
     gcs = np.full((1,disks),towers-1,dtype=int)
-    generate(p, ics, gcs, disks, towers)
+    generate(p, ics, gcs, prob_vis, disks, towers)
 
-def lightsout(type='digital', size=4):
+def lightsout(type='digital', size=4, prob_vis=1.0):
     import importlib
     p = importlib.import_module('latplan.puzzles.lightsout_{}'.format(type))
     p.setup()
@@ -198,7 +205,7 @@ def lightsout(type='digital', size=4):
                                       lambda config: p.successors(config)),
                              instances)
     gcs = np.full((1,size*size),-1)
-    generate(p, ics, gcs)
+    generate(p, ics, gcs, prob_vis)
 
 ################################################################
 

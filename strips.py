@@ -70,6 +70,13 @@ parameters = {
     'loss'               :["BCE"],
 }
 
+def add_missingness(image_stack, prob_vis):
+    '''Mask out pixels of the image stack according to 1-prob_vis'''
+    rand_samps = np.random.random(size=(image_stack.reshape(image_stack.shape[0],-1)).shape)
+    vis_masks = 1.0*np.less(rand_samps, prob_vis).reshape(image_stack.shape)
+    masked_imgs = np.multiply(image_stack, vis_masks)
+    return masked_imgs
+
 def select(data,num):
     return data[random.randint(0,data.shape[0],num)]
 
@@ -182,7 +189,7 @@ def show_summary(ae,train,test):
 
 ################################################################
 
-def puzzle(type='mnist',width=3,height=3,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment=""):
+def puzzle(type='mnist',width=3,height=3,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment="",prob_vis=1.00):
     for name, value in locals().items():
         if value is not None:
             parameters[name] = [value]
@@ -195,8 +202,9 @@ def puzzle(type='mnist',width=3,height=3,num_examples=6500,N=None,num_actions=No
     with np.load(path) as data:
         pre_configs = data['pres'][:num_examples]
         suc_configs = data['sucs'][:num_examples]
-    pres = p.generate(pre_configs,width,height)
-    sucs = p.generate(suc_configs,width,height)
+    # TWK: Wrap custom `add_missingness()` method around the data generators
+    pres = add_missingness(p.generate(pre_configs,width,height), prob_vis)
+    sucs = add_missingness(p.generate(suc_configs,width,height), prob_vis)
     transitions = np.array([pres, sucs])
     states = np.concatenate((transitions[0], transitions[1]), axis=0)
     data = np.swapaxes(transitions,0,1)
@@ -210,7 +218,7 @@ def puzzle(type='mnist',width=3,height=3,num_examples=6500,N=None,num_actions=No
     dump_actions(ae,transitions)
     dump_states(ae,states)
 
-def hanoi(disks=7,towers=4,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment=""):
+def hanoi(disks=7,towers=4,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment="",prob_vis=1.00):
     for name, value in locals().items():
         if value is not None:
             parameters[name] = [value]
@@ -222,8 +230,9 @@ def hanoi(disks=7,towers=4,num_examples=6500,N=None,num_actions=None,direct=None
     with np.load(path) as data:
         pre_configs = data['pres']
         suc_configs = data['sucs']
-    pres = p.generate(pre_configs,disks,towers)
-    sucs = p.generate(suc_configs,disks,towers)
+    # TWK: Wrap custom `add_missingness()` method around the data generators
+    pres = add_missingness(p.generate(pre_configs,disks,towers), prob_vis)
+    sucs = add_missingness(p.generate(suc_configs,disks,towers), prob_vis)
     transitions = np.array([pres, sucs])
     
     states = np.concatenate((transitions[0], transitions[1]), axis=0)
@@ -239,7 +248,7 @@ def hanoi(disks=7,towers=4,num_examples=6500,N=None,num_actions=None,direct=None
     dump_actions(ae,transitions)
     dump_states(ae,states)
 
-def lightsout(type='digital',size=4,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment=""):
+def lightsout(type='digital',size=4,num_examples=6500,N=None,num_actions=None,direct=None,stop_gradient=False,aeclass="ConvolutionalGumbelAE",comment="",prob_vis=1.00):
     for name, value in locals().items():
         if value is not None:
             parameters[name] = [value]
@@ -252,8 +261,9 @@ def lightsout(type='digital',size=4,num_examples=6500,N=None,num_actions=None,di
     with np.load(path) as data:
         pre_configs = data['pres'][:num_examples]
         suc_configs = data['sucs'][:num_examples]
-    pres = p.generate(pre_configs)
-    sucs = p.generate(suc_configs)
+    # TWK: Wrap custom `add_missingness()` method around the data generators
+    pres = add_missingness(p.generate(pre_configs), prob_vis)
+    sucs = add_missingness(p.generate(suc_configs), prob_vis)
     transitions = np.array([pres, sucs])
     states = np.concatenate((transitions[0], transitions[1]), axis=0)
     data = np.swapaxes(transitions,0,1)

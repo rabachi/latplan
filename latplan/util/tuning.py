@@ -368,7 +368,7 @@ def simple_genetic_search(task, default_config, parameters, path,
 def reproduce(task, default_config, parameters, path, report=None, report_best=None, limit=3):
     best = {'eval'    :None, 'params'  :None, 'artifact':None}
 
-    open_list, close_list = load_history(path)
+    open_list, close_list = load_history(path[:-5])
 
     def _iter(config,default_config):
         artifact, eval = task(merge_hash(default_config,config))
