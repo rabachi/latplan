@@ -45,25 +45,25 @@ export -f task
              ::: $probdir/*/latplan.puzzles.puzzle_mnist/* \
              ::: blind gc lama lmcut mands
 
-    parallel echo task \
-             ::: $base/puzzle_mandrill*$suffix/${key}.pddl \
-             ::: $probdir/*/latplan.puzzles.puzzle_mandrill/* \
-             ::: blind gc lama lmcut mands
+    # parallel echo task \
+    #          ::: $base/puzzle_mandrill*$suffix/${key}.pddl \
+    #          ::: $probdir/*/latplan.puzzles.puzzle_mandrill/* \
+    #          ::: blind gc lama lmcut mands
 
-    parallel echo task \
-             ::: $base/puzzle_spider*$suffix/${key}.pddl \
-             ::: $probdir/*/latplan.puzzles.puzzle_spider/* \
-             ::: blind gc lama lmcut mands
+    # parallel echo task \
+    #          ::: $base/puzzle_spider*$suffix/${key}.pddl \
+    #          ::: $probdir/*/latplan.puzzles.puzzle_spider/* \
+    #          ::: blind gc lama lmcut mands
 
     parallel echo task \
              ::: $base/lightsout_digital*$suffix/${key}.pddl \
              ::: $probdir/*/latplan.puzzles.lightsout_digital/* \
              ::: blind gc lama lmcut mands
 
-    parallel echo task \
-             ::: $base/lightsout_twisted*$suffix/${key}.pddl \
-             ::: $probdir/*/latplan.puzzles.lightsout_twisted/* \
-             ::: blind gc lama lmcut mands
+    # parallel echo task \
+    #          ::: $base/lightsout_twisted*$suffix/${key}.pddl \
+    #          ::: $probdir/*/latplan.puzzles.lightsout_twisted/* \
+    #          ::: blind gc lama lmcut mands
 
     # parallel echo task \
         #          ::: $base/hanoi*$suffix/${key}.pddl \
@@ -89,7 +89,8 @@ rm $taskfile-split/*
 split -l $taskperjob $taskfile $taskfile-split/$taskfile.
 
 proj=$(date +%Y%m%d%H%M)ama3
-submit="jbsub -cores $cores -mem ${memperjob}g -queue x86_${hours}h -proj $proj"
+# submit="jbsub -cores $cores -mem ${memperjob}g -queue x86_${hours}h -proj $proj"
+submit=""
 export PYTHONUNBUFFERED=1
 
 batchtask (){
