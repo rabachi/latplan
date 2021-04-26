@@ -99,7 +99,7 @@ def main(domainfile, problem_dir, heuristics):
     
     ###### preprocessing ################################################################
     os.path.exists(ig) or np.savetxt(ig,[bits],"%d")
-    echodo(["helper/ama3-problem.sh",ig,problemfile])
+    echodo(["helper/problem.sh",ig,problemfile])
     log("generated problem")
     
     ###### do planning #############################################
@@ -109,9 +109,7 @@ def main(domainfile, problem_dir, heuristics):
         log("running a validator")
         echodo(["arrival", domainfile, problemfile, planfile, tracefile])
         log("simulated the plan")
-        with open(csvfile,"w") as f:
-            echodo(["lisp/ama3-read-latent-state-traces.bin", tracefile, str(len(init))],
-                   stdout=f)
+        echodo(["lisp/read-latent-state-traces.bin", tracefile, str(len(init)), csvfile])
         plan = np.loadtxt(csvfile, dtype=int)
         log("parsed the plan")
         img_states = sae.decode(plan)

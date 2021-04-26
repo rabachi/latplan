@@ -43,6 +43,8 @@ default_parameters = {
     'train_softmax'   : True,    # if true, latent output is continuous
     'test_gumbel'     : False,   # if true, noise is added during testing
     'test_softmax'    : False,   # if true, latent output is continuous
+    'locality'        : 0.0,
+    'locality_delay'  : 0.0,
 }
 # hyperparameter tuning
 parameters = {
@@ -74,15 +76,10 @@ def select(data,num):
 def plot_autoencoding_image(ae,test,train):
     if 'plot' not in mode:
         return
-
-    # plot the latent states
     rz = np.random.randint(0,2,(6,*ae.zdim()))
     ae.plot_autodecode(rz,ae.local("autodecoding_random.png"),verbose=True)
-
-    ae.plot_transitions(test[:6], ae.local("transitions_test"),verbose=True)
-    ae.plot_transitions(train[:6], ae.local("transitions_train"),verbose=True)
-
-    return
+    ae.plot(test[:6],ae.local("autoencoding_test.png"),verbose=True)
+    ae.plot(train[:6],ae.local("autoencoding_train.png"),verbose=True)
 
 def dump_all_actions(ae,configs,trans_fn,name="all_actions.csv",repeat=1):
     if 'dump' not in mode:

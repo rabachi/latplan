@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os.path
 import sys, traceback, types, linecache
 import numpy as np
 
@@ -16,21 +15,11 @@ def print_object(o,include_private=False):
           and not isinstance(get(key),types.FunctionType) \
           and not isinstance(get(key),types.ModuleType)   \
           and not isinstance(get(key),type)
-    def remove_array(thing):
+    def printer(thing):
         if isinstance(thing,np.ndarray):
             return "<numpy.ndarray {:8s} {}>".format(str(thing.dtype),thing.shape)
         else:
-            return thing
-
-    def printer(thing):
-        if isinstance(thing,list):
-            return [printer(remove_array(o)) for o, _ in zip(thing, range(3))]
-        elif isinstance(thing,tuple):
-            return tuple([printer(remove_array(o)) for o in thing])
-        elif isinstance(thing,dict):
-            return {k:printer(remove_array(v)) for k,v in thing.items()}
-        else:
-            return remove_array(thing)
+            return repr(thing)
     
     for key in o:
         try:
@@ -41,9 +30,9 @@ def print_object(o,include_private=False):
     for key in o:
         try:
             if include(key):
-                print("{} = {}".format(key.rjust(maxlen+4),repr(printer(get(key)))),file=sys.stderr)
+                print("{} = {}".format(key.rjust(maxlen+4),printer(get(key))),file=sys.stderr)
         except Exception as e:
-            print("{} = Error printing object : {}".format(str(key).rjust(maxlen),e),file=sys.stderr)
+            print("{} = Error printing object : {}".format(key.rjust(maxlen),e),file=sys.stderr)
 
 def format(exit=True):
     np.set_printoptions(threshold=25,formatter=None)
@@ -58,7 +47,7 @@ def format(exit=True):
         f_locals = f.f_locals
         f_line = linecache.getline(f_filename, f_lineno).strip()
 
-        print(" ","File",os.path.relpath(f_filename),"line",f_lineno,"function",f_name,":",f_line,file=sys.stderr)
+        print(" ","File",f_filename,"line",f_lineno,"function",f_name,":",f_line,file=sys.stderr)
         print_object(f_locals)
         print(file=sys.stderr)
         

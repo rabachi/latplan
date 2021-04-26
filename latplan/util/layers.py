@@ -1,9 +1,7 @@
-import keras.initializers
 import keras.backend as K
 from keras.layers import *
-from keras.initializers import Initializer
 import numpy as np
-import tensorflow as tf
+
 debug = False
 # debug = True
 
@@ -35,8 +33,8 @@ def list_layer_io(net):
     else:
         print("nothing can be displayed")
 
+from functools import reduce
 def Sequential (array):
-    from functools import reduce
     def apply1(arg,f):
         if debug:
             print("applying {}({})".format(f,arg))
@@ -47,11 +45,10 @@ def Sequential (array):
     return lambda x: reduce(apply1, array, x)
 
 def ConditionalSequential (array, condition, **kwargs):
-    from functools import reduce
     def apply1(arg,f):
         if debug:
             print("applying {}({})".format(f,arg))
-        concat = Concatenate(**kwargs)([condition, arg])
+        concat = Concatenate(**kwargs)([flatten(condition), flatten(arg)])
         return f(concat)
     return lambda x: reduce(apply1, array, x)
 
@@ -68,21 +65,6 @@ def wrap(x,y,**kwargs):
     "wrap arbitrary operation"
     return Lambda(lambda x:y,**kwargs)(x)
 
-
-def Densify(layers):
-    "Apply layers in a densenet-like manner."
-    def densify_fn(x):
-        def rec(x,layers):
-            layer, *rest = layers
-
-            result = layer(x)
-            if len(rest) == 0:
-                return result
-            else:
-                return rec(concatenate([x,result]), rest)
-        return rec(x,layers)
-    return densify_fn
-
 def flatten(x):
     if K.ndim(x) >= 3:
         try:
@@ -92,26 +74,6 @@ def flatten(x):
             return Flatten()(x)
     else:
         return x
-def flatten1D(x):
-    def fn(x):
-        if K.ndim(x) == 3:
-            return x
-        elif K.ndim(x) > 3:
-            s = K.shape(x)
-            return K.reshape(x, [K.shape(x)[0],int(np.prod(K.int_shape(x)[1:-1])),K.int_shape(x)[-1]])
-        else:
-            raise Exception(f"unsupported shape {K.shape(x)}")
-    return Lambda(fn)(x)
-def flatten2D(x):
-    def fn(x):
-        if K.ndim(x) == 4:
-            return x
-        elif K.ndim(x) > 4:
-            return K.reshape(x, [K.shape(x)[0],int(np.prod(K.int_shape(x)[1:-2])),K.int_shape(x)[-2],K.int_shape(x)[-1]])
-        else:
-            raise Exception(f"unsupported shape {K.shape(x)}")
-    return Lambda(fn)(x)
-
 
 def set_trainable (model, flag):
     from collections.abc import Iterable
@@ -168,7 +130,7 @@ class HistoryBasedEarlyStopping(Callback):
 
     def on_train_end(self, logs=None):
         if self.stopped_epoch > 0 and self.verbose > 0:
-            print(f'\nEpoch {self.stopped_epoch}: early stopping {type(self)}')
+            print('\nEpoch %05d: early stopping' % (self.stopped_epoch))
             print('history:',self.history)
 
 class GradientEarlyStopping(HistoryBasedEarlyStopping):
@@ -212,7 +174,7 @@ class GradientEarlyStopping(HistoryBasedEarlyStopping):
 class ChangeEarlyStopping(HistoryBasedEarlyStopping):
     "Stops when the training gets stabilized: when the change of the past epochs are below a certain threshold"
     def __init__(self, monitor='val_loss',
-                 threshold=0.00001, epoch_start=0, sample_epochs=20, verbose=0):
+                 threshold=0.001, epoch_start=0, sample_epochs=20, verbose=0):
         super().__init__()
         self.monitor = monitor
         self.verbose = verbose
@@ -239,14 +201,40 @@ class ChangeEarlyStopping(HistoryBasedEarlyStopping):
                 self.model.stop_training = True
                 self.stopped_epoch = epoch
 
+class MinimalEarlyStopping(HistoryBasedEarlyStopping):
+    "Stops when the value is simply too high"
+    def __init__(self, monitor='val_loss',
+                 threshold=0.2, epoch_start=0, sample_epochs=20, verbose=0):
+        super().__init__()
+        self.monitor = monitor
+        self.verbose = verbose
+        self.threshold = threshold
+        self.history = []
+        self.epoch_start = epoch_start
+        self.sample_epochs = sample_epochs
+        self.stopped_epoch = 0
+
+    def on_epoch_end(self, epoch, logs=None):
+        import warnings
+        current = logs.get(self.monitor)
+        if current is None:
+            warnings.warn('Early stopping requires %s available!' %
+                          (self.monitor), RuntimeWarning)
+
+        self.history.append(current) # to the last
+        if len(self.history) > self.sample_epochs:
+            self.history.pop(0) # from the front
+            if (np.median(self.history) >= self.threshold) and (self.epoch_start <= epoch) :
+                self.model.stop_training = True
+                self.stopped_epoch = epoch
+
 class LinearEarlyStopping(HistoryBasedEarlyStopping):
     "Stops when the value goes above the linearly decreasing upper bound"
     def __init__(self,
                  epoch_end,
                  epoch_start=0,
                  monitor='val_loss',
-                 ub_ratio_start=1.0, ub_ratio_end=0.0, # note: relative to the loss at epoch 0
-                 target_value=None,
+                 value_start=1.0, value_end=0.0,
                  sample_epochs=20, verbose=0):
         super().__init__()
         self.monitor = monitor
@@ -254,15 +242,10 @@ class LinearEarlyStopping(HistoryBasedEarlyStopping):
         self.history = []
         self.epoch_end     = epoch_end
         self.epoch_start   = epoch_start
-        self.ub_ratio_end     = ub_ratio_end
-        self.ub_ratio_start   = ub_ratio_start
+        self.value_end     = value_end
+        self.value_start   = value_start
         self.sample_epochs = sample_epochs
         self.stopped_epoch = 0
-        self.value_start = float("inf")
-        if target_value is not None:
-            self.value_end = target_value
-        else:
-            self.value_end = 0.0
 
     def on_epoch_end(self, epoch, logs=None):
         import warnings
@@ -271,52 +254,12 @@ class LinearEarlyStopping(HistoryBasedEarlyStopping):
             warnings.warn('Early stopping requires %s available!' %
                           (self.monitor), RuntimeWarning)
 
-        if epoch == self.epoch_start:
-            self.value_start = current
-
-        progress_ratio = (epoch - self.epoch_start) / (self.epoch_end - self.epoch_start)
-        ub_ratio = self.ub_ratio_start + (self.ub_ratio_end - self.ub_ratio_start) * progress_ratio
-        ub = (self.value_start - self.value_end) * ub_ratio + self.value_end
+        ub = self.value_start + (self.value_end - self.value_start) / (self.epoch_end - self.epoch_start) * (epoch - self.epoch_start)
 
         self.history.append(current) # to the last
         if len(self.history) > self.sample_epochs:
             self.history.pop(0) # from the front
             if (np.median(self.history) >= ub) and (self.epoch_start <= epoch) :
-                self.model.stop_training = True
-                self.stopped_epoch = epoch
-
-class ExplosionEarlyStopping(HistoryBasedEarlyStopping):
-    "Stops when the value goes above the upper bound, which is set to a very large value (1e8 by default)"
-    def __init__(self,
-                 epoch_end,
-                 epoch_start=0,
-                 monitor='val_loss',
-                 sample_epochs=20, verbose=0):
-        super().__init__()
-        self.monitor       = monitor
-        self.verbose       = verbose
-        self.history       = []
-        self.epoch_end     = epoch_end
-        self.epoch_start   = epoch_start
-        self.sample_epochs = sample_epochs
-        self.stopped_epoch = 0
-
-    def on_epoch_end(self, epoch, logs=None):
-        import warnings
-        current = logs.get(self.monitor)
-        if current is None:
-            warnings.warn('Early stopping requires %s available!' %
-                          (self.monitor), RuntimeWarning)
-        if epoch == 0:
-            self.ub = current * 10
-        if np.isnan(current) :
-            self.model.stop_training = True
-            self.stopped_epoch = epoch
-            return
-        self.history.append(current) # to the last
-        if len(self.history) > self.sample_epochs:
-            self.history.pop(0) # from the front
-            if (np.median(self.history) >= self.ub) and (self.epoch_start <= epoch) :
                 self.model.stop_training = True
                 self.stopped_epoch = epoch
 
@@ -390,18 +333,6 @@ def smooth_max(*args):
 def smooth_min(*args):
     return K.in_train_phase(-K.logsumexp(-K.stack(args,axis=0), axis=0)+K.log(2.0), K.minimum(*args))
 
-stclip_counter = 0
-def stclip(min_value,high_value,name="stclip"):
-    "clip with straight-through gradient"
-    global stclip_counter
-    stclip_counter += 1
-    import tensorflow as tf
-    def fn(x):
-        x_clip = K.clip(x, min_value, high_value)
-        return K.stop_gradient(x_clip - x) + x
-    return Lambda(fn,name="{}_{}".format(name,stclip_counter))
-
-
 def delay(self, x, amount):
     switch = K.variable(0)
     def fn(epoch,log):
@@ -425,19 +356,17 @@ def dapply(x,fn):
 
 class Gaussian:
     count = 0
-
-    def __init__(self, beta=0.):
+    
+    def __init__(self, beta=1.):
         self.beta = beta
         
     def call(self, mean_log_var):
-        sym_shape = K.shape(mean_log_var)
-        shape = K.int_shape(mean_log_var)
-        dims = [sym_shape[i] for i in range(len(shape)-1)]
-        dim = shape[-1]//2
-        mean    = mean_log_var[...,:dim]
-        log_var = mean_log_var[...,dim:]
-        noise = K.exp(0.5 * log_var) * K.random_normal(shape=(*dims, dim))
-        return K.in_train_phase(mean + noise, mean)
+        batch = K.shape(mean_log_var)[0]
+        dim = K.int_shape(mean_log_var)[1]//2
+        print(batch,dim)
+        mean    = mean_log_var[:,:dim]
+        log_var = mean_log_var[:,dim:]
+        return mean + K.exp(0.5 * log_var) * K.random_normal(shape=(batch, dim))
     
     def __call__(self, mean_log_var):
         Gaussian.count += 1
@@ -445,64 +374,19 @@ class Gaussian:
 
         layer = Lambda(self.call,name="gaussian_{}".format(c))
 
-        sym_shape = K.shape(mean_log_var)
-        shape = K.int_shape(mean_log_var)
-        dims = [sym_shape[i] for i in range(len(shape)-1)]
-        dim = shape[-1]//2
-        mean    = mean_log_var[...,:dim]
-        log_var = mean_log_var[...,dim:]
-
+        batch = K.shape(mean_log_var)[0]
+        dim = K.int_shape(mean_log_var)[1]//2
+        mean    = mean_log_var[:,:dim]
+        log_var = mean_log_var[:,dim:]
         loss = -0.5 * K.mean(K.sum(1 + log_var - K.square(mean) - K.exp(log_var), axis=-1)) * self.beta
 
         layer.add_loss(K.in_train_phase(loss, 0.0), mean_log_var)
         
         return layer(mean_log_var)
 
-class Uniform:
-    count = 0
-
-    def __init__(self, beta=0.):
-        self.beta = beta
-
-    def call(self, mean_width):
-        sym_shape = K.shape(mean_width)
-        shape = K.int_shape(mean_width)
-        dims = [sym_shape[i] for i in range(len(shape)-1)]
-        dim = shape[-1]//2
-        mean = mean_width[...,:dim]
-        width = mean_width[...,dim:]
-        noise = width * K.random_uniform(shape=(*dims, dim),minval=-0.5, maxval=0.5)
-        return K.in_train_phase(mean + noise, mean)
-
-    def __call__(self, mean_width):
-        Uniform.count += 1
-        c = Uniform.count-1
-
-        layer = Lambda(self.call,name="uniform_{}".format(c))
-
-        sym_shape = K.shape(mean_width)
-        shape = K.int_shape(mean_width)
-        dims = [sym_shape[i] for i in range(len(shape)-1)]
-        dim = shape[-1]//2
-        mean = mean_width[...,:dim]
-        width = mean_width[...,dim:]
-
-        # KL
-        high = mean + width/2
-        low  = mean - width/2
-        high = K.clip(high, 0.0, 1.0)
-        low  = K.clip(low,  0.0, 1.0)
-        intersection = high-low
-        loss = K.mean(intersection) * self.beta
-        # but this does not seem informative --- if it has no overlap with [0,1], it is always 0
-        # Total Variation / Earth Mover would seem much better choice
-        layer.add_loss(K.in_train_phase(loss, 0.0))
-        return layer(mean_width)
-
 class ScheduledVariable:
     """General variable which is changed during the course of training according to some schedule"""
     def __init__(self,name="variable",):
-        self.name = name
         self.variable = K.variable(self.value(0), name=name)
         
     def value(self,epoch):
@@ -518,62 +402,59 @@ Each subclasses should implement a method for it."""
 class GumbelSoftmax(ScheduledVariable):
     count = 0
     
-    def __init__(self,N,M,min,max,full_epoch,
-                 annealer    = anneal_rate,
-                 beta        = 1.,
-                 offset      = 0,
-                 train_noise = True,
-                 train_hard  = False,
-                 test_noise  = False,
-                 test_hard   = True, ):
-        self.N           = N
-        self.M           = M
-        self.min         = min
-        self.max         = max
-        self.train_noise = train_noise
-        self.train_hard  = train_hard
-        self.test_noise  = test_noise
-        self.test_hard   = test_hard
+    def __init__(self,N,M,min,max,full_epoch,annealer=anneal_rate, beta=1., offset=0,
+                 train_gumbel=True,
+                 train_softmax=True,
+                 test_gumbel=False,
+                 test_softmax=False, ):
+        self.N = N
+        self.M = M
+        self.min = min
+        self.max = max
+        self.train_gumbel  = train_gumbel
+        self.train_softmax = train_softmax
+        self.test_gumbel   = test_gumbel
+        self.test_softmax  = test_softmax
         self.anneal_rate = annealer(full_epoch-offset,min,max)
-        self.offset      = offset
-        self.beta        = beta
+        self.offset = offset
+        self.beta = beta
         super(GumbelSoftmax, self).__init__("temperature")
         
     def call(self,logits):
         u = K.random_uniform(K.shape(logits), 0, 1)
         gumbel = - K.log(-K.log(u + 1e-20) + 1e-20)
 
-        if self.train_noise:
+        if self.train_gumbel:
             train_logit = logits + gumbel
         else:
             train_logit = logits
             
-        if self.test_noise:
+        if self.test_gumbel:
             test_logit = logits + gumbel
         else:
             test_logit = logits
 
-        def soft_train(x):
+        def softmax_train(x):
             return K.softmax( x / self.variable )
-        def hard_train(x):
+        def argmax_train(x):
             # use straight-through estimator
             argmax  = K.one_hot(K.argmax( x ), self.M)
             softmax = K.softmax( x / self.variable )
             return K.stop_gradient(argmax-softmax) + softmax
-        def soft_test(x):
+        def softmax_test(x):
             return K.softmax( x / self.min )
-        def hard_test(x):
+        def argmax_test(x):
             return K.one_hot(K.argmax( x ), self.M)
 
-        if self.train_hard:
-            train_activation = hard_train
+        if self.train_softmax:
+            train_activation = softmax_train
         else:
-            train_activation = soft_train
+            train_activation = argmax_train
 
-        if self.test_hard:
-            test_activation = hard_test
+        if self.test_softmax:
+            test_activation = softmax_test
         else:
-            test_activation = soft_test
+            test_activation = argmax_test
 
         return K.in_train_phase(
             train_activation( train_logit ),
@@ -598,178 +479,10 @@ class GumbelSoftmax(ScheduledVariable):
         return np.max([self.min,
                        self.max * np.exp(- self.anneal_rate * max(epoch - self.offset, 0))])
 
-class BinaryConcrete(ScheduledVariable):
-    count = 0
-
-    def __init__(self,min,max,full_epoch,
-                 annealer    = anneal_rate,
-                 beta        = 1.,
-                 offset      = 0,
-                 train_noise = True,
-                 train_hard  = False,
-                 test_noise  = False,
-                 test_hard   = True, ):
-        self.min         = min
-        self.max         = max
-        self.train_noise = train_noise
-        self.train_hard  = train_hard
-        self.test_noise  = test_noise
-        self.test_hard   = test_hard
-        self.anneal_rate = annealer(full_epoch-offset,min,max)
-        self.offset      = offset
-        self.beta        = beta
-        super(BinaryConcrete, self).__init__("temperature")
-
-    def call(self,logits):
-        u = K.random_uniform(K.shape(logits), 0, 1)
-        logistic = K.log(u + 1e-20) - K.log(1 - u + 1e-20)
-
-        if self.train_noise:
-            train_logit = logits + logistic
-        else:
-            train_logit = logits
-
-        if self.test_noise:
-            test_logit = logits + logistic
-        else:
-            test_logit = logits
-
-        def soft_train(x):
-            return K.sigmoid( x / self.variable )
-        def hard_train(x):
-            # use straight-through estimator
-            sigmoid = K.sigmoid(x / self.variable )
-            step    = K.round(sigmoid)
-            return K.stop_gradient(step-sigmoid) + sigmoid
-        def soft_test(x):
-            return K.sigmoid( x / self.min )
-        def hard_test(x):
-            sigmoid = K.sigmoid(x / self.min )
-            return K.round(sigmoid)
-
-        if self.train_hard:
-            train_activation = hard_train
-        else:
-            train_activation = soft_train
-
-        if self.test_hard:
-            test_activation = hard_test
-        else:
-            test_activation = soft_test
-
-        return K.in_train_phase(
-            train_activation( train_logit ),
-            test_activation ( test_logit  ))
-
-    def __call__(self,logits):
-        BinaryConcrete.count += 1
-        c = BinaryConcrete.count-1
-
-        layer = Lambda(self.call,name="concrete_{}".format(c))
-
-        q0 = K.sigmoid(logits)
-        q1 = 1-q0
-        log_q0 = K.log(q0 + 1e-20)
-        log_q1 = K.log(q1 + 1e-20)
-        loss = K.mean(q0 * log_q0 + q1 * log_q1) * self.beta
-
-        layer.add_loss(K.in_train_phase(loss, 0.0), logits)
-
-        return layer(logits)
-
-    def value(self,epoch):
-        return np.max([self.min,
-                       self.max * np.exp(- self.anneal_rate * max(epoch - self.offset, 0))])
-
-
-class RandomLogistic(Initializer):
-    """Initializer that generates tensors with a normal distribution.
-
-    # Arguments
-        mean: a python scalar or a scalar tensor. Mean of the random values
-          to generate.
-        scale: a python scalar or a scalar tensor. Scale of the
-          random values to generate.
-        seed: A Python integer. Used to seed the random generator.
-    """
-
-    def __init__(self, mean=0., scale=1.0, seed=None):
-        self.mean = mean
-        self.scale = scale
-        self.seed = seed
-
-    def __call__(self, shape, dtype=None):
-        # self.mean, self.scale,
-        u = K.random_uniform(shape, dtype=dtype, seed=self.seed)
-        # it does log(u / 1-u)
-        M, eps = tf.float32.max, tf.float32.min
-        Mu = M * u
-        Mu = K.clip(Mu, eps, M-eps)
-        W = K.log(Mu)-K.log(M-Mu)
-        return W * self.scale + self.mean
-
-    def get_config(self):
-        return {
-            'mean': self.mean,
-            'scale': self.scale,
-            'seed': self.seed
-        }
-
-# modified from https://github.com/HenningBuhl/VQ-VAE_Keras_Implementation
-# note: this is useful only for convolutional embedding whre the same embedding
-# can be reused across cells
-class VQVAELayer(Layer):
-    def __init__(self, embedding_dim, num_classes=2, beta=1.0,
-                 initializer='uniform', epsilon=1e-10, **kwargs):
-        self.embedding_dim = embedding_dim
-        self.num_classes = num_classes
-        self.beta = beta
-        self.initializer = keras.initializers.VarianceScaling(distribution=initializer)
-        super(VQVAELayer, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        # Add embedding weights.
-        self.w = self.add_weight(name='embedding',
-                                  shape=(self.embedding_dim, self.num_classes),
-                                  initializer=self.initializer,
-                                  trainable=True)
-        # Finalize building.
-        super(VQVAELayer, self).build(input_shape)
-
-    def call(self, x):
-        # Flatten input except for last dimension.
-        flat_inputs = K.reshape(x, (-1, self.embedding_dim))
-
-        # Calculate distances of input to embedding vectors.
-        distances = (K.sum(flat_inputs**2, axis=1, keepdims=True)
-                     - 2 * K.dot(flat_inputs, self.w)
-                     + K.sum(self.w ** 2, axis=0, keepdims=True))
-
-        # Retrieve encoding indices.
-        encoding_indices = K.argmax(-distances, axis=1)
-        encodings = K.one_hot(encoding_indices, self.num_classes)
-        encoding_indices = K.reshape(encoding_indices, K.shape(x)[:-1])
-        quantized = self.quantize(encoding_indices)
-
-        e_latent_loss = K.mean((K.stop_gradient(quantized) - x) ** 2)
-        q_latent_loss = K.mean((quantized - K.stop_gradient(x)) ** 2)
-        self.add_loss(e_latent_loss + q_latent_loss * self.beta)
-
-        return K.stop_gradient(quantized - x) + x
-
-    @property
-    def embeddings(self):
-        return self.w
-
-    def quantize(self, encoding_indices):
-        w = K.transpose(self.embeddings.read_value())
-        return tf.nn.embedding_lookup(w, encoding_indices, validate_indices=False)
-
-
 class BaseSchedule(ScheduledVariable):
-    def __init__(self,schedule={0:0},*args,**kwargs):
+    def __init__(self,schedule={0:0}):
         self.schedule = schedule
-        super().__init__(*args,**kwargs)
+        super(BaseSchedule, self).__init__()
 
 class StepSchedule(BaseSchedule):
     """
@@ -779,30 +492,19 @@ class StepSchedule(BaseSchedule):
    ____|
 
 """
-    def __init__(self,*args,**kwargs):
-        self.current_value = None
-        super().__init__(*args,**kwargs)
-
     def value(self,epoch):
         assert epoch >= 0
-
-        def report(value):
-            if self.current_value != value:
-                print(f"Epoch {epoch} StepSchedule(name={self.name}): {self.current_value} -> {value}")
-                self.current_value = value
-            return value
-
         pkey = None
         pvalue = None
         for key, value in sorted(self.schedule.items(),reverse=True):
             # from large to small
             key = int(key) # for when restoring from the json file
             if key <= epoch:
-                return report(value)
+                return value
             else:               # epoch < key 
                 pkey, pvalue = key, value
 
-        return report(pvalue)
+        return pvalue
 
 class LinearSchedule(BaseSchedule):
     """

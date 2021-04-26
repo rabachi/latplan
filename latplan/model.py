@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Model classes for latplan.
+Networks named like XXX2 uses gumbel softmax for the output layer too,
+assuming the input/output image is binarized
 """
 
 import json
@@ -25,9 +26,8 @@ from .util.distances import *
 from .util.layers    import *
 from .util.perminv   import *
 from .util.tuning    import InvalidHyperparameterError
-from .util.plot      import plot_grid, squarify
-from .util           import ensure_list, NpEncoder, curry
-from .util.stacktrace import print_object
+from .util           import ensure_list, NpEncoder
+
 # utilities ###############################################################
 
 def get(name):
@@ -50,13 +50,6 @@ def load(directory,allow_failure=False):
     return classobj(directory).load(allow_failure=allow_failure)
 
 
-def _plot(path,columns):
-    rows = []
-    for seq in zip(*columns):
-        rows.extend(seq)
-    plot_grid(rows, w=len(columns), path=path, verbose=True)
-    return
-
 class Network:
     """Base class for various neural networks including GANs, AEs and Classifiers.
 Provides an interface for saving / loading the trained weights as well as hyperparameters.
@@ -78,6 +71,7 @@ This dict can be used while building the network, making it easier to perform a 
         self.built_aux = False
         self.compiled = False
         self.loaded = False
+        self.verbose = True
         self.parameters = parameters
         if "full_epoch" not in parameters:
             if "epoch" in self.parameters:
@@ -92,7 +86,7 @@ This dict can be used while building the network, making it easier to perform a 
         self.callbacks = [LambdaCallback(on_epoch_end=self.bar_update,
                                          # on_epoch_begin=self.bar_update
                                          ),
-                          keras.callbacks.TensorBoard(log_dir=self.local("logs/{}-{}".format(path,datetime.datetime.now().isoformat())), write_graph=False)]
+                          keras.callbacks.TensorBoard(log_dir=self.local('logs/{}-{}'.format(path,datetime.datetime.now().isoformat())), write_graph=False)]
 
     def build(self,*args,**kwargs):
         """An interface for building a network. Input-shape: list of dimensions.
@@ -100,12 +94,11 @@ Users should not overload this method; Define _build() for each subclass instead
 This function calls _build bottom-up from the least specialized class.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
         if self.built:
-            print("Avoided building {} twice.".format(self))
+            if self.verbose:
+                print("Avoided building {} twice.".format(self))
             return
-        print("Building the network")
         self._build(*args,**kwargs)
         self.built = True
-        print("Network built")
         return self
 
     def _build(self,*args,**kwargs):
@@ -115,9 +108,6 @@ Users may define a method for each subclass for adding a new build-time feature.
 Each method should call the _build() method of the superclass in turn.
 Users are not expected to call this method directly. Call build() instead.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
-        return self._build_primary(*args,**kwargs)
-
-    def _build_primary(self,*args,**kwargs):
         pass
 
     def build_aux(self,*args,**kwargs):
@@ -128,12 +118,11 @@ Users should not overload this method; Define _build() for each subclass instead
 This function calls _build bottom-up from the least specialized class.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
         if self.built_aux:
-            print("Avoided building {} twice.".format(self))
+            if self.verbose:
+                print("Avoided building {} twice.".format(self))
             return
-        print("Building the auxiliary network")
         self._build_aux(*args,**kwargs)
         self.built_aux = True
-        print("Auxiliary network built")
         return self
 
     def _build_aux(self,*args,**kwargs):
@@ -145,34 +134,23 @@ Users may define a method for each subclass for adding a new build-time feature.
 Each method should call the _build() method of the superclass in turn.
 Users are not expected to call this method directly. Call build() instead.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
-        return self._build_aux_primary(*args,**kwargs)
-
-    def _build_aux_primary(self,*args,**kwargs):
         pass
 
     def compile(self,*args,**kwargs):
         """An interface for compiling a network."""
         if self.compiled:
-            print("Avoided compiling {} twice.".format(self))
+            if self.verbose:
+                print("Avoided compiling {} twice.".format(self))
             return
-        print("Compiling the network")
         self._compile(*args,**kwargs)
         self.compiled = True
-        print("Network compiled")
         return self
 
     def _compile(self,optimizers):
         """An interface for compileing a network."""
         # default method.
-        print(f"there are {len(self.nets)} networks.")
-        print(f"there are {len(optimizers)} optimizers.")
-        print(f"there are {len(self.losses)} losses.")
-        assert len(self.nets) == len(optimizers)
-        assert len(self.nets) == len(self.losses)
         for net, o, loss in zip(self.nets, optimizers, self.losses):
-            print(f"compiling {net} with {o}, {loss}.")
             net.compile(optimizer=o, loss=loss, metrics=self.metrics)
-        return
 
     def local(self,path):
         """A convenient method for converting a relative path to the learned result directory
@@ -185,9 +163,8 @@ into a full path."""
 Users should not overload this method; Define _save() for each subclass instead.
 This function calls _save bottom-up from the least specialized class.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
-        print("Saving the network to {}".format(self.local("")))
+        print("Saving to {}".format(self.local('')))
         self._save()
-        print("Network saved")
         return self
 
     def _save(self):
@@ -199,10 +176,10 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         for i, net in enumerate(self.nets):
             net.save_weights(self.local("net{}.h5".format(i)))
 
-        with open(self.local("aux.json"), "w") as f:
+        with open(self.local('aux.json'), 'w') as f:
             json.dump({"parameters":self.parameters,
                        "class"     :self.__class__.__name__,
-                       "input_shape":self.net.input_shape[1:]}, f , skipkeys=True, cls=NpEncoder, indent=2)
+                       "input_shape":self.net.input_shape[1:]}, f , skipkeys=True, cls=NpEncoder)
 
     def save_epoch(self, freq=10):
         def fn(epoch, logs):
@@ -215,23 +192,17 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
 Users should not overload this method; Define _load() for each subclass instead.
 This function calls _load bottom-up from the least specialized class.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
-        if self.loaded:
-            print("Avoided loading {} twice.".format(self))
-            return
-
         if allow_failure:
             try:
-                print("Loading the network from {} (with failure allowed)".format(self.local("")))
-                self._load()
-                self.loaded = True
-                print("Network loaded")
+                if not self.loaded:
+                    self._load()
+                    self.loaded = True
             except Exception as e:
                 print("Exception {} during load(), ignored.".format(e))
         else:
-            print("Loading the network from {} (with failure not allowed)".format(self.local("")))
-            self._load()
-            self.loaded = True
-            print("Network loaded")
+            if not self.loaded:
+                self._load()
+                self.loaded = True
         return self
 
     def _load(self):
@@ -240,7 +211,7 @@ Users may define a method for each subclass for adding a new load-time feature.
 Each method should call the _load() method of the superclass in turn.
 Users are not expected to call this method directly. Call load() instead.
 Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around methods."""
-        with open(self.local("aux.json"), "r") as f:
+        with open(self.local('aux.json'), 'r') as f:
             data = json.load(f)
             self.parameters = data["parameters"]
             self.build(tuple(data["input_shape"]))
@@ -248,34 +219,22 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         for i, net in enumerate(self.nets):
             net.load_weights(self.local("net{}.h5".format(i)))
 
-    def reload_with_shape(self,input_shape):
-        """Rebuild the network for a shape that is different from the training time, then load the weights."""
-        with open(self.local("aux.json"), "r") as f:
-            # self.build / self.loaded flag are ignored
-            self._build(input_shape)
-            self._build_aux(input_shape)
-        for i, net in enumerate(self.nets):
-            net.load_weights(self.local("net{}.h5".format(i)))
-
     def initialize_bar(self):
         import progressbar
         widgets = [
-            progressbar.Timer(format="%(elapsed)s"),
-            " ", progressbar.Counter(), " | ",
+            progressbar.Timer(format='%(elapsed)s'),
+            ' ', progressbar.Counter(), ' | ',
             # progressbar.Bar(),
-            progressbar.AbsoluteETA(format="%(eta)s"), " ",
+            progressbar.AbsoluteETA(format='%(eta)s'), ' ',
             DynamicMessage("status")
         ]
-        self.bar = progressbar.ProgressBar(max_value=self.parameters["epoch"], widgets=widgets)
+        self.bar = progressbar.ProgressBar(max_value=self.max_epoch, widgets=widgets)
 
     def bar_update(self, epoch, logs):
         "Used for updating the progress bar."
 
-        if not hasattr(self,"bar"):
+        if not hasattr(self,'bar'):
             self.initialize_bar()
-            from colors import color
-            from functools import partial
-            self.style = partial(color, fg="black", bg="white")
 
         tlogs = {}
         for k in self.custom_log_functions:
@@ -291,7 +250,7 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
                 vlogs[k[4:]] = logs[k]
 
         if (epoch % 10) == 9:
-            self.bar.update(epoch+1, status = self.style("[v] "+"  ".join(["{} {:8.3g}".format(k,v) for k,v in sorted(vlogs.items())])) + "\n")
+            self.bar.update(epoch+1, status = "[v] "+"  ".join(["{} {:8.3g}".format(k,v) for k,v in sorted(vlogs.items())]) + "\n")
         else:
             self.bar.update(epoch+1, status = "[t] "+"  ".join(["{} {:8.3g}".format(k,v) for k,v in sorted(tlogs.items())]))
 
@@ -314,10 +273,9 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         return loss
 
     def train(self,train_data,
-              val_data      = None,
-              train_data_to = None,
-              val_data_to   = None,
-              save          = True,
+              epoch=200,batch_size=1000,optimizer='adam',lr=0.0001,val_data=None,save=True,
+              train_data_to=None,
+              val_data_to=None,
               **kwargs):
         """Main method for training.
  This method may be overloaded by the subclass into a specific training method, e.g. GAN training."""
@@ -329,23 +287,9 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         if val_data_to  is None:
             val_data_to  = val_data
 
-        epoch      = self.parameters["epoch"]
-        batch_size = self.parameters["batch_size"]
-        optimizer  = self.parameters["optimizer"]
-        lr         = self.parameters["lr"]
-        clipnorm   = self.parameters["clipnorm"]
-        # clipvalue  = self.parameters["clipvalue"]
-
-        def make_optimizer(net):
-            return getattr(keras.optimizers,optimizer)(
-                lr,
-                clipnorm=clipnorm
-                # clipvalue=clipvalue,
-            )
-
-
-        input_shape = train_data.shape[1:]
-        self.build(input_shape)
+        self.max_epoch = epoch
+        self.build(train_data.shape[1:]) # depends on self.optimizer
+        print("parameters",self.parameters)
 
         def replicate(thing):
             if isinstance(thing, tuple):
@@ -358,10 +302,15 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
 
         train_data    = replicate(train_data)
         train_data_to = replicate(train_data_to)
-        val_data      = replicate(val_data)
-        val_data_to   = replicate(val_data_to)
+        val_data     = replicate(val_data)
+        val_data_to  = replicate(val_data_to)
+        optimizer     = replicate(optimizer)
+        lr            = replicate(lr)
 
-        self.compile(list(map(make_optimizer, self.nets)))
+        def get_optimizer(optimizer,lr):
+            return getattr(keras.optimizers,optimizer)(lr)
+
+        self.compile(list(map(get_optimizer, optimizer, lr)))
 
         def assert_length(data):
             l = None
@@ -384,17 +333,18 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
                 yield subdata[i*batch_size:min((i+1)*batch_size,len(subdata))]
 
         index_array = np.arange(len(train_data[0]))
+        np.random.shuffle(index_array)
 
         clist = CallbackList(callbacks=self.callbacks)
         clist.set_model(self.nets[0])
         clist.set_params({
-            "batch_size": batch_size,
-            "epochs": epoch,
-            "steps": None,
-            "samples": len(train_data[0]),
-            "verbose": 0,
-            "do_validation": False,
-            "metrics": [],
+            'batch_size': batch_size,
+            'epochs': epoch,
+            'steps': None,
+            'samples': len(train_data[0]),
+            'verbose': 0,
+            'do_validation': False,
+            'metrics': [],
         })
         self.nets[0].stop_training = False
 
@@ -417,11 +367,10 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         try:
             clist.on_train_begin()
             logs = {}
+            indices_cache       = [ indices for indices in make_batch(index_array) ]
+            train_data_cache    = [[ train_subdata   [indices] for train_subdata    in train_data    ] for indices in indices_cache ]
+            train_data_to_cache = [[ train_subdata_to[indices] for train_subdata_to in train_data_to ] for indices in indices_cache ]
             for epoch in range(epoch):
-                np.random.shuffle(index_array)
-                indices_cache       = [ indices for indices in make_batch(index_array) ]
-                train_data_cache    = [[ train_subdata   [indices] for train_subdata    in train_data    ] for indices in indices_cache ]
-                train_data_to_cache = [[ train_subdata_to[indices] for train_subdata_to in train_data_to ] for indices in indices_cache ]
                 clist.on_epoch_begin(epoch,logs)
                 for train_subdata_cache,train_subdata_to_cache in zip(train_data_cache,train_data_to_cache):
                     for net,train_subdata_batch_cache,train_subdata_to_batch_cache in zip(self.nets, train_subdata_cache,train_subdata_to_cache):
@@ -440,12 +389,7 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         self.loaded = True
         if save:
             self.save()
-        try:
-            self.build_aux(input_shape)
-        except Exception as e:
-            print("building the auxilialy network failed.")
-            from .util.stacktrace import format
-            format(False)
+        self.build_aux(train_data.shape[1:]) # depends on self.optimizer
         return self
 
     def evaluate(self,*args,**kwargs):
@@ -521,7 +465,7 @@ The latter two are used for verifying the performance of the AE.
         test_data     = train_data if test_data is None else test_data
         train_data_to = train_data if train_data_to is None else train_data_to
         test_data_to  = test_data  if test_data_to is None else test_data_to
-        opts = {"verbose":0,"batch_size":batch_size}
+        opts = {'verbose':0,'batch_size':batch_size}
 
         performance = {}
 
@@ -536,11 +480,11 @@ The latter two are used for verifying the performance of the AE.
 
         self._report(test_both,**opts)
 
-        with open(self.local("performance.json"), "w") as f:
-            json.dump(performance, f, cls=NpEncoder, indent=2)
+        with open(self.local('performance.json'), 'w') as f:
+            json.dump(performance, f, cls=NpEncoder)
 
-        with open(self.local("parameter_count.json"), "w") as f:
-            json.dump(count_params(self.autoencoder), f, cls=NpEncoder, indent=2)
+        with open(self.local('parameter_count.json'), 'w') as f:
+            json.dump(count_params(self.autoencoder), f, cls=NpEncoder)
 
         return self
 
@@ -572,56 +516,26 @@ The latter two are used for verifying the performance of the AE.
         # python methods cannot use self in the
         # default values, because python sucks
 
-        def fn(N               = self.parameters["N"],
-               M               = self.parameters["M"],
-               max_temperature = self.parameters["max_temperature"],
-               min_temperature = self.parameters["min_temperature"],
-               full_epoch      = self.parameters["full_epoch"],
-               train_noise     = self.parameters["train_noise"],
-               train_hard      = self.parameters["train_hard"],
-               test_noise      = self.parameters["test_noise"],
-               test_hard       = self.parameters["test_hard"],
-               beta            = self.parameters["beta"],
+        def fn(N               = self.parameters['N'],
+               M               = self.parameters['M'],
+               max_temperature = self.parameters['max_temperature'],
+               min_temperature = self.parameters['min_temperature'],
+               full_epoch      = self.parameters['full_epoch'],
+               train_gumbel    = self.parameters['train_gumbel'],
+               test_gumbel     = self.parameters['test_gumbel'],
+               test_softmax    = self.parameters['test_softmax'],
+               beta            = self.parameters['beta'],
                offset          = 0):
             gs = GumbelSoftmax(
                 N,M,min_temperature,max_temperature,full_epoch,
-                offset      = offset,
-                train_noise = train_noise,
-                train_hard  = train_hard,
-                test_noise  = test_noise,
-                test_hard   = test_hard,
-                beta        = beta)
+                offset        = offset,
+                train_gumbel  = train_gumbel,
+                test_gumbel   = test_gumbel,
+                test_softmax  = test_softmax,
+                beta          = beta)
             self.callbacks.append(LambdaCallback(on_epoch_end=gs.update))
-            # self.custom_log_functions["tau"] = lambda: K.get_value(gs.variable)
+            # self.custom_log_functions['tau'] = lambda: K.get_value(gs.variable)
             return gs
-
-        return fn(**kwargs)
-
-    def build_bc(self,
-                 **kwargs):
-        # python methods cannot use self in the
-        # default values, because python sucks
-
-        def fn(max_temperature = self.parameters["max_temperature"],
-               min_temperature = self.parameters["min_temperature"],
-               full_epoch      = self.parameters["full_epoch"],
-               train_noise     = self.parameters["train_noise"],
-               train_hard      = self.parameters["train_hard"],
-               test_noise      = self.parameters["test_noise"],
-               test_hard       = self.parameters["test_hard"],
-               beta            = self.parameters["beta"],
-               offset          = 0):
-            bc = BinaryConcrete(
-                min_temperature,max_temperature,full_epoch,
-                offset      = offset,
-                train_noise = train_noise,
-                train_hard  = train_hard,
-                test_noise  = test_noise,
-                test_hard   = test_hard,
-                beta        = beta)
-            self.callbacks.append(LambdaCallback(on_epoch_end=bc.update))
-            # self.custom_log_functions["tau"] = lambda: K.get_value(gs.variable)
-            return bc
 
         return fn(**kwargs)
 
@@ -632,26 +546,29 @@ class ConcreteLatentMixin:
         super().__init__(*args,**kwargs)
         # this is not necessary for shape consistency but it helps pruning some hyperparameters
         if "parameters" in kwargs: # otherwise the object is instantiated without paramteters for loading the value later
-            if self.parameters["M"] != 2:
+            if self.parameters['M'] != 2:
                 raise InvalidHyperparameterError()
     def zdim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],)
     def zindim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],self.parameters['M'],)
     def activation(self):
-        return self.build_bc()
+        return Sequential([
+            self.build_gs(),
+            take_true(),
+        ])
 
 class QuantizedLatentMixin:
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         # this is not necessary for shape consistency but it helps pruning some hyperparameters
         if "parameters" in kwargs: # otherwise the object is instantiated without paramteters for loading the value later
-            if self.parameters["M"] != 2:
+            if self.parameters['M'] != 2:
                 raise InvalidHyperparameterError()
     def zdim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],)
     def zindim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],)
     def activation(self):
         return heavyside()
 
@@ -660,20 +577,20 @@ class SigmoidLatentMixin:
         super().__init__(*args,**kwargs)
         # this is not necessary for shape consistency but it helps pruning some hyperparameters
         if "parameters" in kwargs: # otherwise the object is instantiated without paramteters for loading the value later
-            if self.parameters["M"] != 2:
+            if self.parameters['M'] != 2:
                 raise InvalidHyperparameterError()
     def zdim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],)
     def zindim(self):
-        return (self.parameters["N"],)
+        return (self.parameters['N'],)
     def activation(self):
         return rounded_sigmoid()
 
 class GumbelSoftmaxLatentMixin:
     def zdim(self):
-        return (self.parameters["N"]*self.parameters["M"],)
+        return (self.parameters['N']*self.parameters['M'],)
     def zindim(self):
-        return (self.parameters["N"]*self.parameters["M"],)
+        return (self.parameters['N']*self.parameters['M'],)
     def activation(self):
         return Sequential([
             self.build_gs(),
@@ -682,12 +599,12 @@ class GumbelSoftmaxLatentMixin:
 
 class SoftmaxLatentMixin:
     def zdim(self):
-        return (self.parameters["N"]*self.parameters["M"],)
+        return (self.parameters['N']*self.parameters['M'],)
     def zindim(self):
-        return (self.parameters["N"]*self.parameters["M"],)
+        return (self.parameters['N']*self.parameters['M'],)
     def activation(self):
         return Sequential([
-            Reshape((self.parameters["N"],self.parameters["M"],)),
+            Reshape((self.parameters['N'],self.parameters['M'],)),
             rounded_softmax(),
             flatten,
         ])
@@ -697,17 +614,17 @@ class SoftmaxLatentMixin:
 class FullConnectedEncoderMixin:
     def build_encoder(self,input_shape):
         return [flatten,
-                GaussianNoise(self.parameters["noise"]),
+                GaussianNoise(self.parameters['noise']),
                 BN(),
-                Dense(self.parameters["layer"], activation="relu", use_bias=False),
+                Dense(self.parameters['layer'], activation='relu', use_bias=False),
                 BN(),
-                Dropout(self.parameters["dropout"]),
-                Dense(self.parameters["layer"], activation="relu", use_bias=False),
+                Dropout(self.parameters['dropout']),
+                Dense(self.parameters['layer'], activation='relu', use_bias=False),
                 BN(),
-                Dropout(self.parameters["dropout"]),
-                Dense(self.parameters["layer"], activation="relu", use_bias=False),
+                Dropout(self.parameters['dropout']),
+                Dense(self.parameters['layer'], activation='relu', use_bias=False),
                 BN(),
-                Dropout(self.parameters["dropout"]),
+                Dropout(self.parameters['dropout']),
                 Dense(np.prod(self.zindim())),
                 self.activation(),
         ]
@@ -717,44 +634,37 @@ class FullConnectedDecoderMixin:
         data_dim = np.prod(input_shape)
         return [
             flatten,
-            *([Dropout(self.parameters["dropout"])] if self.parameters["dropout_z"] else []),
-            Dense(self.parameters["layer"], activation="relu", use_bias=False),
+            *([Dropout(self.parameters['dropout'])] if self.parameters['dropout_z'] else []),
+            Dense(self.parameters['layer'], activation='relu', use_bias=False),
             BN(),
-            Dropout(self.parameters["dropout"]),
-            Dense(self.parameters["layer"], activation="relu", use_bias=False),
+            Dropout(self.parameters['dropout']),
+            Dense(self.parameters['layer'], activation='relu', use_bias=False),
             BN(),
-            Dropout(self.parameters["dropout"]),
-            Dense(data_dim, activation="sigmoid"),
+            Dropout(self.parameters['dropout']),
+            Dense(data_dim, activation='sigmoid'),
             Reshape(input_shape),]
 
 class ConvolutionalEncoderMixin:
-    """A mixin that uses convolutions + fc in the encoder."""
+    """A mixin that uses convolutions in the encoder."""
     def build_encoder(self,input_shape):
-        if len(input_shape) == 2:
-            reshape = Reshape((*input_shape,1)) # monochrome image
-        elif len(input_shape) == 3:
-            reshape = lambda x: x
-        else:
-            raise Exception(f"ConvolutionalEncoderMixin: unsupported shape {input_shape}")
-
-        return [reshape,
-                GaussianNoise(self.parameters["noise"]),
+        return [Reshape((*input_shape,1)),
+                GaussianNoise(self.parameters['noise']),
                 BN(),
-                *[Convolution2D(self.parameters["clayer"],(3,3),
-                                activation="relu",padding="same", use_bias=False),
-                  Dropout(self.parameters["dropout"]),
+                *[Convolution2D(self.parameters['clayer'],(3,3),
+                                activation=self.parameters['activation'],padding='same', use_bias=False),
+                  Dropout(self.parameters['dropout']),
                   BN(),
                   MaxPooling2D((2,2)),],
-                *[Convolution2D(self.parameters["clayer"],(3,3),
-                                activation="relu",padding="same", use_bias=False),
-                  Dropout(self.parameters["dropout"]),
+                *[Convolution2D(self.parameters['clayer'],(3,3),
+                                activation=self.parameters['activation'],padding='same', use_bias=False),
+                  Dropout(self.parameters['dropout']),
                   BN(),
                   MaxPooling2D((2,2)),],
                 flatten,
                 Sequential([
-                    Dense(self.parameters["layer"], activation="relu", use_bias=False),
+                    Dense(self.parameters['layer'], activation=self.parameters['activation'], use_bias=False),
                     BN(),
-                    Dropout(self.parameters["dropout"]),
+                    Dropout(self.parameters['dropout']),
                     Dense(np.prod(self.zindim())),
                 ]),
                 self.activation(),
@@ -779,150 +689,41 @@ class ConvolutionalDecoderMixin:
         crop = ((crop[0][0],crop[0][1]),(crop[1][0],crop[1][1]))
         print(last_convolution,first_convolution,diff,crop)
 
-        return [*([Dropout(self.parameters["dropout"])] if self.parameters["dropout_z"] else []),
-                *[Dense(self.parameters["layer"],
-                        activation="relu",
+        return [*([Dropout(self.parameters['dropout'])] if self.parameters['dropout_z'] else []),
+                *[Dense(self.parameters['layer'],
+                        activation=self.parameters['activation'],
                         use_bias=False),
                   BN(),
-                  Dropout(self.parameters["dropout"]),],
-                *[Dense(np.prod(last_convolution) * self.parameters["clayer"],
-                        activation="relu",
+                  Dropout(self.parameters['dropout']),],
+                *[Dense(np.prod(last_convolution) * self.parameters['clayer'],
+                        activation=self.parameters['activation'],
                         use_bias=False),
                   BN(),
-                  Dropout(self.parameters["dropout"]),],
-                Reshape((*last_convolution, self.parameters["clayer"])),
+                  Dropout(self.parameters['dropout']),],
+                Reshape((*last_convolution, self.parameters['clayer'])),
                 *[UpSampling2D((2,2)),
-                  Deconvolution2D(self.parameters["clayer"],(3,3),
-                                  activation="relu",
-                                  padding="same",
+                  Deconvolution2D(self.parameters['clayer'],(3,3),
+                                  activation=self.parameters['activation'],
+                                  padding='same',
                                   use_bias=False),
                   BN(),
-                  Dropout(self.parameters["dropout"]),],
+                  Dropout(self.parameters['dropout']),],
                 *[UpSampling2D((2,2)),
-                  Deconvolution2D(1,(3,3), activation="sigmoid",padding="same"),],
+                  Deconvolution2D(1,(3,3), activation='sigmoid',padding='same'),],
                 Cropping2D(crop),
                 Reshape(input_shape),]
-
-
-class FullyConvolutionalAEMixin:
-    """A mixin that uses only convolutional layers in the encoder/decoder."""
-
-    def output_shape(self,layers,input_shape):
-        from functools import reduce
-        def c(input_shape,layer):
-            print(input_shape)
-            return layer.compute_output_shape(input_shape)
-        return reduce(c,layers,input_shape)
-
-    def encoder_block(self,i):
-        """Extend this method for Residual Nets"""
-        k = self.parameters["kernel_size"]
-        p = self.parameters["pooling_size"]
-        w  = self.parameters["encoder_width"]
-        dw = self.parameters["width_increment"]
-        return [
-            Convolution2D(round(w * (dw ** i)), (k,k), activation="relu", padding="same", use_bias=False),
-            BN(),
-            Dropout(self.parameters["encoder_dropout"]),
-            MaxPooling2D((p,p)),
-        ]
-
-    def decoder_block(self,i):
-        """Extend this method for Residual Nets"""
-        k = self.parameters["kernel_size"]
-        p = self.parameters["pooling_size"]
-        w  = self.parameters["encoder_width"]
-        dw = self.parameters["width_increment"]
-        return [
-            UpSampling2D((p,p)),
-            Deconvolution2D(round(w * (dw ** i)),(k,k), activation="relu",padding="same", use_bias=False),
-            BN(),
-            Dropout(self.parameters["decoder_dropout"]),
-        ]
-
-    def build_encoder(self,input_shape):
-        layers = []
-        if len(input_shape) == 2:
-            layers.append(Reshape((*input_shape,1))) # monochrome image
-        elif len(input_shape) == 3:
-            pass
-        else:
-            raise Exception(f"ConvolutionalEncoderMixin: unsupported shape {input_shape}")
-
-        maxdim = max(input_shape[0],input_shape[1])
-        if maxdim > 48:
-            r = 1+(maxdim // 48)
-            layers.append(MaxPooling2D((r,r)))
-
-        layers.append(GaussianNoise(self.parameters["noise"]))
-
-        for i in range(self.parameters["encoder_depth"]-1):
-            layers.extend(self.encoder_block(i))
-        k = self.parameters["kernel_size"]
-        layers.append(Convolution2D(self.parameters["P"], (k,k), padding="same"))
-
-        self.conv_latent_space = self.output_shape(layers,[0,*input_shape])[1:] # H,W,C
-        self.parameters["N"] = np.prod(self.conv_latent_space)
-        print(f"latent space shape is {self.conv_latent_space} : {self.parameters['N']} propositions in total")
-
-        layers.append(
-            # flatten,
-            Reshape((self.parameters["N"],)))
-        # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        # Conv2D does not set the tensor shape properly, and Flatten fails to work
-        # during the build_aux phase.
-        layers.append(self.activation())
-        return layers
-
-    def build_decoder(self,input_shape):
-        layers = [Reshape(self.conv_latent_space),
-                  BN(),
-        ]
-        for i in range(self.parameters["encoder_depth"]-2, -1, -1):
-            layers.extend(self.decoder_block(i))
-        k = self.parameters["kernel_size"]
-
-        if len(input_shape) == 2:
-            layers.append(Deconvolution2D(1, (k,k), padding="same"))
-            layers.append(Reshape(input_shape))
-        elif len(input_shape) == 3:
-            layers.append(Deconvolution2D(3, (k,k), padding="same"))
-        else:
-            raise Exception(f"ConvolutionalEncoderMixin: unsupported shape {input_shape}")
-
-        maxdim = max(input_shape[0],input_shape[1])
-        if maxdim > 48:
-            r = 1+(maxdim // 48)
-            layers.append(UpSampling2D((r,r)))
-
-        if len(input_shape) == 2:
-            layers.append(Reshape(input_shape))
-        elif len(input_shape) == 3:
-            pass
-        else:
-            raise Exception(f"ConvolutionalEncoderMixin: unsupported shape {input_shape}")
-
-        computed_input_shape = self.output_shape(layers,[0,*self.conv_latent_space])[1:]
-        assert input_shape == computed_input_shape
-        return layers
 
 
 # Mixins ################################################################
 
 class ZeroSuppressMixin:
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-        if "parameters" in kwargs: # otherwise the object is instantiated without paramteters for loading the value later
-            if self.parameters["zerosuppress"] == 0.0 and self.parameters["zerosuppress_delay"] != 0.0:
-                raise InvalidHyperparameterError()
-        return
     def _build(self,input_shape):
         super()._build(input_shape)
 
         alpha = StepSchedule(schedule={
             0:0,
             (self.parameters["epoch"]*self.parameters["zerosuppress_delay"]):self.parameters["zerosuppress"],
-        }, name="zerosuppress")
+        })
         self.callbacks.append(LambdaCallback(on_epoch_end=alpha.update))
 
         zerosuppress_loss = K.mean(self.encoder.output)
@@ -961,6 +762,7 @@ class EarlyStopMixin:
             LinearEarlyStopping(
                 self.parameters["epoch"],
                 epoch_start = self.parameters["epoch"]*self.parameters["earlystop_delay"],
+                value_start = 1.0-self.parameters["earlystop_delay"],
                 verbose     = 1,))
 
 
@@ -986,14 +788,11 @@ class HammingLoggerMixin:
 class LocalityMixin:
     def _build(self,input_shape):
         super()._build(input_shape)
-        if "locality_delay" not in self.parameters:
-            self.parameters["locality_delay"] = 0.0
-        if "locality" not in self.parameters:
-            self.parameters["locality"] = 0.0
+
         self.locality_alpha = StepSchedule(schedule={
             0:0,
             (self.parameters["epoch"]*self.parameters["locality_delay"]):self.parameters["locality"],
-        }, name="locality")
+        })
         self.callbacks.append(LambdaCallback(on_epoch_end=self.locality_alpha.update))
 
         def locality(x, y):
@@ -1039,7 +838,7 @@ class StateAE(EarlyStopMixin, FullConnectedDecoderMixin, FullConnectedEncoderMix
     """An AE whose latent layer is GumbelSofmax.
 Fully connected layers only, no convolutions.
 Note: references to self.parameters[key] are all hyperparameters."""
-    def _build_primary(self,input_shape):
+    def _build(self,input_shape):
         self.encoder_net = self.build_encoder(input_shape)
         self.decoder_net = self.build_decoder(input_shape)
 
@@ -1047,22 +846,16 @@ Note: references to self.parameters[key] are all hyperparameters."""
         z = Sequential(self.encoder_net)(x)
         y = Sequential(self.decoder_net)(z)
 
-        if "loss" in self.parameters:
-            self.loss = eval(self.parameters["loss"])
-        else:
-            self.loss = MSE
-
-        if "eval" in self.parameters:
-            e = eval(self.parameters["eval"])
-            if e not in self.metrics:
-                self.metrics.append(e)
-            self.eval = e
-
+        self.loss = BCE
+        self.metrics.append(BCE)
+        self.metrics.append(MSE)
         self.encoder     = Model(x, z)
         self.autoencoder = Model(x, y)
         self.net = self.autoencoder
+        self.features = Model(x, Sequential([flatten, *_encoder[:-2]])(x))
+        self.custom_log_functions['lr'] = lambda: K.get_value(self.net.optimizer.lr)
 
-    def _build_aux_primary(self,input_shape):
+    def _build_aux(self,input_shape):
         # to be called after the training
         z2 = Input(shape=self.zdim(), name="autodecoder")
         y2 = Sequential(self.decoder_net)(z2)
@@ -1070,11 +863,16 @@ Note: references to self.parameters[key] are all hyperparameters."""
         self.decoder     = Model(z2, y2)
         self.autodecoder = Model(z2, w2)
 
+    def get_features(self, data, **kwargs):
+        return self.features.predict(data, **kwargs)
+
     def plot(self,data,path,verbose=False):
         self.load()
         x = data
         z = self.encode(x)
-        y = self.autoencode(x)
+        y = self.decode(z)
+        b = np.round(z)
+        by = self.decode(b)
 
         xg = gaussian(x)
         xs = salt(x)
@@ -1085,14 +883,21 @@ Note: references to self.parameters[key] are all hyperparameters."""
         yp = self.autoencode(xp)
 
         dy  = ( y-x+1)/2
+        dby = (by-x+1)/2
         dyg = (yg-x+1)/2
         dys = (ys-x+1)/2
         dyp = (yp-x+1)/2
 
+        from .util.plot import plot_grid, squarify
         _z = squarify(z)
+        _b = squarify(b)
 
-        _plot(path, (x, _z, y, dy, xg, yg, dyg, xs, ys, dys, xp, yp, dyp))
-        return x,z,y
+        images = []
+        from .util.plot import plot_grid
+        for seq in zip(x, _z, y, dy, _b, by, dby, xg, yg, dyg, xs, ys, dys, xp, yp, dyp):
+            images.extend(seq)
+        plot_grid(images, w=16, path=path, verbose=verbose)
+        return x,z,y,b,by
 
     def plot_autodecode(self,data,path,verbose=False):
         self.load()
@@ -1109,15 +914,20 @@ Note: references to self.parameters[key] are all hyperparameters."""
         x3 = self.decode(z3)
         x3r = self.decode(z3r)
 
-        M, N = self.parameters["M"], self.parameters["N"]
+        M, N = self.parameters['M'], self.parameters['N']
 
+        from .util.plot import plot_grid, squarify
         _z   = squarify(z)
         _z2  = squarify(z2)
         _z2r = squarify(z2r)
         _z3  = squarify(z3)
         _z3r = squarify(z3r)
 
-        _plot(path, (_z, x, _z2, _z2r, x2, x2r, _z3, _z3r, x3, x3r))
+        images = []
+        from .util.plot import plot_grid
+        for seq in zip(_z, x, _z2, _z2r, x2, x2r, _z3, _z3r, x3, x3r):
+            images.extend(seq)
+        plot_grid(images, w=10, path=path, verbose=verbose)
         return _z, x, _z2, _z2r
 
     def plot_variance(self,data,path,verbose=False):
@@ -1126,22 +936,56 @@ Note: references to self.parameters[key] are all hyperparameters."""
         samples = 100
         z = np.array([ np.round(self.encode(x)) for i in range(samples)])
         z = np.einsum("sbz->bsz",z)
+        from .util.plot import plot_grid
         plot_grid(z, w=6, path=path, verbose=verbose)
 
 
-class TransitionWrapper:
+class TransitionAE(ConvolutionalEncoderMixin, StateAE):
     def double_mode(self):
-        pass
+        self.mode(False)
     def single_mode(self):
-        pass
+        self.mode(True)
     def mode(self, single):
-        pass
+        if single:
+            if self.built_aux:
+                self.encoder     = self.s_encoder
+                self.decoder     = self.s_decoder
+                self.autoencoder = self.s_autoencoder
+                self.autodecoder = self.s_autodecoder
+        else:
+            self.encoder     = self.d_encoder
+            self.autoencoder = self.d_autoencoder
+            if self.built_aux:
+                self.decoder     = self.d_decoder
+                self.autodecoder = self.d_autodecoder
+
+    def as_single(self, fn, data, *args, **kwargs):
+        self.single_mode()
+        try:
+            if data.shape[1] == 2:
+                return fn(data[:, 0, ...],*args,**kwargs)
+            else:
+                return fn(data,*args,**kwargs)
+        finally:
+            self.double_mode()
+
+    def plot(self, data, *args, **kwargs):
+        return self.as_single(super().plot, data, *args, **kwargs)
+    def plot_autodecode(self, data, *args, **kwargs):
+        return self.as_single(super().plot_autodecode, data, *args, **kwargs)
+    def plot_variance(self, data, *args, **kwargs):
+        return self.as_single(super().plot_variance, data, *args, **kwargs)
 
     def adaptively(self, fn, data, *args, **kwargs):
-        if data.shape[1] == 2:
-            return fn(data,*args,**kwargs)
-        else:
-            return fn(np.expand_dims(data,1).repeat(2, axis=1),*args,**kwargs)[:,0]
+        try:
+            if data.shape[1] == 2:
+                self.double_mode()
+                return fn(data,*args,**kwargs)
+            else:
+                self.single_mode()
+                return fn(data,*args,**kwargs)
+        finally:
+            self.double_mode()
 
     def encode(self, data, *args, **kwargs):
         return self.adaptively(super().encode, data, *args, **kwargs)
@@ -1152,67 +996,57 @@ class TransitionWrapper:
     def autodecode(self, data, *args, **kwargs):
         return self.adaptively(super().autodecode, data, *args, **kwargs)
 
-
     def _build(self,input_shape):
-        self.transition_input_shape = input_shape
-        super()._build(input_shape[1:])
-
-    def _build_aux(self,input_shape):
-        self.transition_input_shape = input_shape
-        super()._build_aux(input_shape[1:])
-
-    def _build_primary(self,state_input_shape):
         # [batch, 2, ...] -> [batch, ...]
-        self.encoder_net = self.build_encoder(state_input_shape)
-        self.decoder_net = self.build_decoder(state_input_shape)
+        self.encoder_net = self.build_encoder(input_shape[1:])
+        self.decoder_net = self.build_decoder(input_shape[1:])
 
-        x       = Input(shape=self.transition_input_shape, name="double_input")
-        _, x_pre, x_suc = dapply(x, lambda x: x)
+        x               = Input(shape=input_shape, name="double_input")
         z, z_pre, z_suc = dapply(x, Sequential(self.encoder_net))
-        y, y_pre, y_suc = dapply(z, Sequential(self.decoder_net))
+        y, _,     _     = dapply(z, Sequential(self.decoder_net))
 
-        self.encoder     = Model(x, z)
-        self.autoencoder = Model(x, y)
+        self.d_encoder     = Model(x, z)
+        self.d_autoencoder = Model(x, y)
 
         if "loss" in self.parameters:
-            state_loss_fn = eval(self.parameters["loss"])
+            specified = eval(self.parameters["loss"])
+            def loss(x,y):
+                return K.in_train_phase(specified(x,y), MSE(x,y))
+
+            self.loss = loss
         else:
-            state_loss_fn = MSE
+            self.loss = MSE
 
-        alpha = StepSchedule(schedule={
-            0:0,
-            (self.parameters["epoch"]*self.parameters["main_delay"]):1,
-        }, name="main")
-        self.callbacks.append(LambdaCallback(on_epoch_end=alpha.update))
-        def loss(x,y):
-            return alpha.variable * (state_loss_fn(x_pre, y_pre) + state_loss_fn(x_suc, y_suc))
-        self.loss = loss
-
-        self.net = self.autoencoder
-
-        if "eval" in self.parameters:
-            e = eval(self.parameters["eval"])
-            if e not in self.metrics:
-                self.metrics.append(e)
-            self.eval = e
+        self.net = self.d_autoencoder
 
         self.double_mode()
         return
 
-    def _build_aux_primary(self,state_input_shape):
+    def _build_aux(self,input_shape):
+        x = Input(shape=input_shape[1:], name="single_input")
+        z = Sequential(self.encoder_net)(x)
+        y = Sequential(self.decoder_net)(z)
+
+        z2 = Input(shape=K.int_shape(z)[1:], name="single_input_decoder")
+        y2 = Sequential(self.decoder_net)(z2)
+        w2 = Sequential(self.encoder_net)(y2)
+
+        self.s_encoder     = Model(x, z)
+        self.s_decoder     = Model(z2, y2)
+        self.s_autoencoder = Model(x, y)
+        self.s_autodecoder = Model(z2, w2)
 
         z2       = Input(shape=(2,*self.zdim()), name="double_input_decoder")
         y2, _, _ = dapply(z2, Sequential(self.decoder_net))
         w2, _, _ = dapply(y2, Sequential(self.encoder_net))
 
-        self.decoder     = Model(z2, y2)
-        self.autodecoder = Model(z2, w2)
-        return
+        self.d_decoder     = Model(z2, y2)
+        self.d_autodecoder = Model(z2, w2)
 
     def dump_actions(self,pre,suc,**kwargs):
         def save(name,data):
             print("Saving to",self.local(name))
-            with open(self.local(name), "wb") as f:
+            with open(self.local(name), 'wb') as f:
                 np.savetxt(f,data,"%d")
 
         data = np.concatenate([pre,suc],axis=1)
@@ -1227,7 +1061,7 @@ class BaseActionMixin:
         return self.action.predict(data,**kwargs)
     def decode_action(self,data,**kwargs):
         return self.apply.predict(data,**kwargs)
-    def plot_transitions(self,data,path,verbose=False):
+    def plot(self,data,path,verbose=False):
         import os.path
         basename, ext = os.path.splitext(path)
         pre_path = basename+"_pre"+ext
@@ -1235,25 +1069,36 @@ class BaseActionMixin:
 
         x = data
         z = self.encode(x)
-        y = self.autoencode(x)
+        y = self.decode(z)
 
         x_pre, x_suc = x[:,0,...], x[:,1,...]
         z_pre, z_suc = z[:,0,...], z[:,1,...]
-        y_pre, y_suc_aae = y[:,0,...], y[:,1,...]
-        y_suc = self.autoencode(x_suc) # run adaptively
+        y_pre, y_suc = y[:,0,...], y[:,1,...]
 
-        self.plot(x_pre,pre_path,verbose=verbose)
-        self.plot(x_suc,suc_path,verbose=verbose)
+        super().plot(x_pre,pre_path,verbose=verbose)
+        super().plot(x_suc,suc_path,verbose=verbose)
 
         action    = self.encode_action(np.concatenate([z_pre,z_suc],axis=1))
         z_suc_aae = self.decode_action([z_pre, action])
+        y_suc_aae = self.decode(z_suc_aae)
+
+        z_suc_min = np.minimum(z_suc, z_suc_aae)
+        y_suc_min = self.decode(z_suc_min)
+
+        from .util.plot import plot_grid, squarify
 
         def diff(src,dst):
             return (dst - src + 1)/2
+        def _plot(path,columns):
+            rows = []
+            for seq in zip(*columns):
+                rows.extend(seq)
+            plot_grid(rows, w=len(columns), path=path, verbose=verbose)
 
         _z_pre     = squarify(z_pre)
         _z_suc     = squarify(z_suc)
         _z_suc_aae = squarify(z_suc_aae)
+        _z_suc_min = squarify(z_suc_min)
 
         _plot(basename+"_transition"+ext,
               [x_pre, x_suc,
@@ -1272,7 +1117,7 @@ class BaseActionMixin:
 
         return
 
-    def add_metrics(self, x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae,):
+    def add_metrics(self, x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae, l_pre=None, l_suc=None, l_suc_aae=None, w_suc_aae=None, v_suc_aae=None,):
         # x: inputs
         # l: logits to latent
         # z: latent
@@ -1286,9 +1131,16 @@ class BaseActionMixin:
             return mse(x_suc,y_suc_aae)
         def mse_y2y3(true,pred):
             return mse(y_suc,y_suc_aae)
+        def mse_y2v3(true,pred):
+            return mse(y_suc,v_suc_aae)
 
         def mae_z2z3(true, pred):
             return K.mean(mae(K.round(z_suc), K.round(z_suc_aae)))
+        def mae_z2w3(true, pred):
+            return K.mean(mae(K.round(z_suc), K.round(w_suc_aae)))
+
+        def mse_l2l3(true, pred):
+            return K.mean(mse(l_suc, l_suc_aae))
 
         def avg_z2(x, y):
             return K.mean(z_suc)
@@ -1299,7 +1151,13 @@ class BaseActionMixin:
         self.metrics.append(mse_x2y2)
         self.metrics.append(mse_x2y3)
         self.metrics.append(mse_y2y3)
+        if (v_suc_aae is not None):
+            self.metrics.append(mse_y2v3)
         self.metrics.append(mae_z2z3)
+        if (w_suc_aae is not None):
+            self.metrics.append(mae_z2w3)
+        if (l_suc is not None) and (l_suc_aae is not None):
+            self.metrics.append(mse_l2l3)
 
         # self.metrics.append(avg_z2)
         self.metrics.append(avg_z3)
@@ -1309,19 +1167,33 @@ class BaseActionMixin:
         return Sequential([
             Dense(self.parameters["aae_width"], activation=self.parameters["aae_activation"], use_bias=False),
             BN(),
-            Dropout(self.parameters["dropout"]),
+            Dropout(self.parameters['dropout']),
         ])
+
+    def eff_reconstruction_loss(self,x):
+        # optional loss, unused
+        # _, x_pre, x_suc = dapply(x, lambda x: x)
+        # eff_reconstruction_loss = K.mean(bce(x_suc, y_suc_aae))
+        # self.net.add_loss(eff_reconstruction_loss)
+        return
+
+    def effect_minimization_loss(self):
+        # optional loss, unused
+        # self.net.add_loss(1*K.mean(K.sum(action_add,axis=-1)))
+        # self.net.add_loss(1*K.mean(K.sum(action_del,axis=-1)))
+
+        # depending on how effects are encoded, this is also used
+        # self.net.add_loss(1*K.mean(K.sum(action_eff,axis=-1)))
+        return
 
     def _build(self,input_shape):
         super()._build(input_shape)
 
-        x = self.net.input      # keras has a bug, we can"t make a new Input here
+        x = self.net.input      # keras has a bug, we can't make a new Input here
         _, x_pre, x_suc = dapply(x, lambda x: x)
-        z, z_pre, z_suc = dapply(self.encoder.output,     lambda x: x)
-        y, y_pre, y_suc = dapply(self.autoencoder.output, lambda x: x)
+        z, z_pre, z_suc = dapply(self.d_encoder.output,     lambda x: x)
+        y, y_pre, y_suc = dapply(self.d_autoencoder.output, lambda x: x)
 
-        if "stop_gradient" not in self.parameters:
-            self.parameters["stop_gradient"] = False
         if self.parameters["stop_gradient"]:
             z_pre = wrap(z_pre, K.stop_gradient(z_pre))
             z_suc = wrap(z_suc, K.stop_gradient(z_suc))
@@ -1330,19 +1202,15 @@ class BaseActionMixin:
         z_suc_aae = self._apply(z_pre,z_suc,action)
         y_suc_aae = Sequential(self.decoder_net)(z_suc_aae)
 
-        if "loss" in self.parameters:
-            state_loss_fn = eval(self.parameters["loss"])
-        else:
-            state_loss_fn = MSE
+        # denoising loop
+        v_suc_aae = y_suc_aae
+        for i in range(3):
+            w_suc_aae = Sequential(self.encoder_net)(v_suc_aae)
+            v_suc_aae = Sequential(self.decoder_net)(w_suc_aae)
 
-        alpha = StepSchedule(schedule={
-            0:0,
-            (self.parameters["epoch"]*self.parameters["successor_delay"]):1,
-        }, name="successor")
-        self.callbacks.append(LambdaCallback(on_epoch_end=alpha.update))
-        self.net.add_loss(alpha.variable * K.mean(state_loss_fn(x_suc, y_suc_aae)))
+        self.net = Model(x, dmerge(y_pre, y_suc_aae))
 
-        self.add_metrics(x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae)
+        self.add_metrics(x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae, v_suc_aae=v_suc_aae, w_suc_aae=w_suc_aae)
         return
 
     def _report(self,test_both,**opts):
@@ -1445,7 +1313,7 @@ class BaseActionMixin:
 
         def save(name,data):
             print("Saving to",self.local(name))
-            with open(self.local(name), "wb") as f:
+            with open(self.local(name), 'wb') as f:
                 np.savetxt(f,data,"%d")
 
         N=pre.shape[1]
@@ -1478,72 +1346,322 @@ class BaseActionMixin:
         save("actions_both.csv", np.concatenate([data,data_aae], axis=0))
         save("actions_both+ids.csv", np.concatenate([data_byid,data_aae_byid], axis=0))
 
+        # def generate_aae_action(known_transisitons):
+        #     states = known_transisitons.reshape(-1, N)
+        #     from .util import set_difference
+        #     def repeat_over(array, repeats, axis=0):
+        #         array = np.expand_dims(array, axis)
+        #         array = np.repeat(array, repeats, axis)
+        #         return np.reshape(array,(*array.shape[:axis],-1,*array.shape[axis+2:]))
+        # 
+        #     print("start generating transitions")
+        #     # s1,s2,s3,s1,s2,s3,....
+        #     repeated_states  = repeat_over(states, len(all_labels), axis=0)
+        #     # a1,a1,a1,a2,a2,a2,....
+        #     repeated_actions = np.repeat(all_labels, len(states), axis=0)
+        # 
+        #     y = self.decode_action([repeated_states, repeated_actions], **kwargs).round().astype(np.int8)
+        #     y = np.concatenate([repeated_states, y], axis=1)
+        # 
+        #     print("remove known transitions")
+        #     y = set_difference(y, known_transisitons)
+        #     print("shuffling")
+        #     import numpy.random
+        #     numpy.random.shuffle(y)
+        #     return y
+        # 
+        # transitions = generate_aae_action(data)
+        # # note: transitions are already shuffled, and also do not contain any examples in data.
+        # actions      = self.encode_action(transitions, **kwargs).round()
+        # actions_byid = to_id(actions)
+        # 
+        # # ensure there are enough test examples
+        # separation = min(len(data)*10,len(transitions)-len(data))
+        # 
+        # # fake dataset is used only for the training.
+        # fake_transitions  = transitions[:separation]
+        # fake_actions_byid = actions_byid[:separation]
+        # 
+        # # remaining data are used only for the testing.
+        # test_transitions  = transitions[separation:]
+        # test_actions_byid = actions_byid[separation:]
+        # 
+        # print(fake_transitions.shape, test_transitions.shape)
+        # 
+        # save("fake_actions.csv",fake_transitions)
+        # save("fake_actions+ids.csv",np.concatenate((fake_transitions,fake_actions_byid), axis=1))
+        # 
+        # from .util import puzzle_module
+        # p = puzzle_module(self.path)
+        # print("decoding pre")
+        # pre_images = self.decode(test_transitions[:,:N],**kwargs)
+        # print("decoding suc")
+        # suc_images = self.decode(test_transitions[:,N:],**kwargs)
+        # print("validating transitions")
+        # valid    = p.validate_transitions([pre_images, suc_images],**kwargs)
+        # invalid  = np.logical_not(valid)
+        # 
+        # valid_transitions  = test_transitions [valid][:len(data)] # reduce the amount of data to reduce runtime
+        # valid_actions_byid = test_actions_byid[valid][:len(data)]
+        # invalid_transitions  = test_transitions [invalid][:len(data)] # reduce the amount of data to reduce runtime
+        # invalid_actions_byid = test_actions_byid[invalid][:len(data)]
+        # 
+        # save("valid_actions.csv",valid_transitions)
+        # save("valid_actions+ids.csv",np.concatenate((valid_transitions,valid_actions_byid), axis=1))
+        # save("invalid_actions.csv",invalid_transitions)
+        # save("invalid_actions+ids.csv",np.concatenate((invalid_transitions,invalid_actions_byid), axis=1))
         return
 
+class NoSucBaseActionMixin:
+    def encode_action(self,data,**kwargs):
+        return self.action.predict(data,**kwargs)
+    def decode_action(self,data,**kwargs):
+        return self.apply.predict(data,**kwargs)
+    def plot(self,data,path,verbose=False):
+        import os.path
+        basename, ext = os.path.splitext(path)
+        pre_path = basename+"_pre"+ext
+        suc_path = basename+"_suc"+ext
 
-# action mapping variations
+        x = data
+        z = self.encode(x)
+        y = self.decode(z)
 
-class DetActionMixin:
-    "Deterministic mapping from a state pair to an action"
-    def build_action_encoder(self):
-        return [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
-            Sequential([
-                        Dense(self.parameters["num_actions"]),
-                        self.build_gs(N=1,
-                                      M=self.parameters["num_actions"],
-                                      offset=self.parameters["aae_delay"],),
-            ]),
-        ]
-    def _action(self,z_pre,z_suc):
-        self.action_encoder_net = self.build_action_encoder()
-        return ConditionalSequential(self.action_encoder_net, z_pre, axis=-1)(z_suc)
+        x_pre, x_suc = x[:,0,...], x[:,1,...]
+        z_pre, z_suc = z[:,0,...], z[:,1,...]
+        y_pre, y_suc = y[:,0,...], y[:,1,...]
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
-        N = self.parameters["N"]
-        transition = Input(shape=(N*2,))
-        pre2 = wrap(transition, transition[:,:N])
-        suc2 = wrap(transition, transition[:,N:])
-        self.action = Model(transition, ConditionalSequential(self.action_encoder_net, pre2, axis=-1)(suc2))
+        super().plot(x_pre,pre_path,verbose=verbose)
+        super().plot(x_suc,suc_path,verbose=verbose)
+
+        action    = self.encode_action(np.concatenate([z_pre,z_suc],axis=1))
+        z_suc_aae = self.decode_action([z_pre, action])
+        y_suc_aae = self.decode(z_suc_aae)
+
+        z_suc_min = np.minimum(z_suc, z_suc_aae)
+        y_suc_min = self.decode(z_suc_min)
+
+        from .util.plot import plot_grid, squarify
+
+        def diff(src,dst):
+            return (dst - src + 1)/2
+        def _plot(path,columns):
+            rows = []
+            for seq in zip(*columns):
+                rows.extend(seq)
+            plot_grid(rows, w=len(columns), path=path, verbose=verbose)
+
+        _z_pre     = squarify(z_pre)
+        _z_suc     = squarify(z_suc)
+        _z_suc_aae = squarify(z_suc_aae)
+        _z_suc_min = squarify(z_suc_min)
+
+        _plot(basename+"_transition"+ext,
+              [x_pre, x_suc,
+               _z_pre,
+               _z_suc,
+               _z_suc_aae,
+               diff(_z_pre, _z_suc),
+               diff(_z_pre, _z_suc_aae),
+               diff(_z_suc, _z_suc_aae),
+               y_pre,
+               y_suc,
+               y_suc_aae,
+               diff(x_pre,y_pre),
+               diff(x_suc,y_suc),
+               diff(x_suc,y_suc_aae),])
+
         return
 
+    def add_metrics(self, x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae, l_pre=None, l_suc=None, l_suc_aae=None, w_suc_aae=None, v_suc_aae=None,):
+        # x: inputs
+        # l: logits to latent
+        # z: latent
+        # y: reconstruction
 
+        def mse_x1y1(true,pred):
+            return mse(x_pre,y_pre)
+        def mse_x2y2(true,pred):
+            return mse(x_suc,y_suc)
+        def mse_x2y3(true,pred):
+            return mse(x_suc,y_suc_aae)
+        def mse_y2y3(true,pred):
+            return mse(y_suc,y_suc_aae)
+        def mse_y2v3(true,pred):
+            return mse(y_suc,v_suc_aae)
 
-# effect mapping variations
+        def mae_z2z3(true, pred):
+            return K.mean(mae(K.round(z_suc), K.round(z_suc_aae)))
+        def mae_z2w3(true, pred):
+            return K.mean(mae(K.round(z_suc), K.round(w_suc_aae)))
 
-class DirectLossMixin:
-    "Additional loss for the latent space successor prediction."
-    def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-        if "parameters" in kwargs: # otherwise the object is instantiated without paramteters for loading the value later
-            if self.parameters["direct"] == 0.0 and self.parameters["direct_delay"] != 0.0:
-                raise InvalidHyperparameterError()
+        def mse_l2l3(true, pred):
+            return K.mean(mse(l_suc, l_suc_aae))
+
+        def avg_z2(x, y):
+            return K.mean(z_suc)
+        def avg_z3(x, y):
+            return K.mean(z_suc_aae)
+
+        self.metrics.append(mse_x1y1)
+        self.metrics.append(mse_x2y2)
+        self.metrics.append(mse_x2y3)
+        self.metrics.append(mse_y2y3)
+        if (v_suc_aae is not None):
+            self.metrics.append(mse_y2v3)
+        self.metrics.append(mae_z2z3)
+        if (w_suc_aae is not None):
+            self.metrics.append(mae_z2w3)
+        if (l_suc is not None) and (l_suc_aae is not None):
+            self.metrics.append(mse_l2l3)
+
+        # self.metrics.append(avg_z2)
+        self.metrics.append(avg_z3)
+
+        return
+    def build_action_fc_unit(self):
+        return Sequential([
+            Dense(self.parameters["aae_width"], activation=self.parameters["aae_activation"], use_bias=False),
+            BN(),
+            Dropout(self.parameters['dropout']),
+        ])
+
+    def eff_reconstruction_loss(self,x):
+        # optional loss, unused
+        # _, x_pre, x_suc = dapply(x, lambda x: x)
+        # eff_reconstruction_loss = K.mean(bce(x_suc, y_suc_aae))
+        # self.net.add_loss(eff_reconstruction_loss)
+        return
+
+    def effect_minimization_loss(self):
+        # optional loss, unused
+        # self.net.add_loss(1*K.mean(K.sum(action_add,axis=-1)))
+        # self.net.add_loss(1*K.mean(K.sum(action_del,axis=-1)))
+
+        # depending on how effects are encoded, this is also used
+        # self.net.add_loss(1*K.mean(K.sum(action_eff,axis=-1)))
         return
 
     def _build(self,input_shape):
         super()._build(input_shape)
 
-        self.direct_alpha = StepSchedule(schedule={
-            0:0,
-            (self.parameters["epoch"]*self.parameters["direct_delay"]):self.parameters["direct"],
-        }, name="direct")
-        self.callbacks.append(LambdaCallback(on_epoch_end=self.direct_alpha.update))
+        x = self.net.input      # keras has a bug, we can't make a new Input here
+        _, x_pre, x_suc = dapply(x, lambda x: x)
+        z, z_pre, z_suc = dapply(self.d_encoder.output,     lambda x: x)
+        y, y_pre, y_suc = dapply(self.d_autoencoder.output, lambda x: x)
+
+        if self.parameters["stop_gradient"]:
+            z_pre = wrap(z_pre, K.stop_gradient(z_pre))
+            z_suc = wrap(z_suc, K.stop_gradient(z_suc))
+
+        action    = self._action(z_pre,z_suc)
+        z_suc_aae = self._apply(z_pre,z_suc,action)
+        y_suc_aae = Sequential(self.decoder_net)(wrap(z_suc, z_suc + 0.0 * z_suc_aae))
+
+        # denoising loop
+        v_suc_aae = y_suc_aae
+        for i in range(3):
+            w_suc_aae = Sequential(self.encoder_net)(v_suc_aae)
+            v_suc_aae = Sequential(self.decoder_net)(w_suc_aae)
+
+        # do not optimize the successor image
+        self.net = Model(x, dmerge(y_pre, y_suc_aae))
+
+        self.add_metrics(x_pre, x_suc, z_pre, z_suc, z_suc_aae, y_pre, y_suc, y_suc_aae, v_suc_aae=v_suc_aae, w_suc_aae=w_suc_aae)
+        return
+
+    def _report(self,test_both,**opts):
+        super()._report(test_both,**opts)
+
+        from .util.np_distances import mse, mae
+
+        test_both(["aae","MSE","vanilla"],
+                  lambda data: mse(data[:,1,...], self.net.predict(data,          **opts)[:,1,...]))
+        test_both(["aae","MSE","gaussian"],
+                  lambda data: mse(data[:,1,...], self.net.predict(gaussian(data),**opts)[:,1,...]))
+        test_both(["aae","MSE","salt"],
+                  lambda data: mse(data[:,1,...], self.net.predict(salt(data),    **opts)[:,1,...]))
+        test_both(["aae","MSE","pepper"],
+                  lambda data: mse(data[:,1,...], self.net.predict(pepper(data),  **opts)[:,1,...]))
+
+        def true_num_actions(data):
+            z     = self.encode(data)
+            z2    = z.reshape((-1,2*z.shape[-1]))
+            actions = self.encode_action(z2, **opts).round()
+            histogram = np.squeeze(actions.sum(axis=0,dtype=int))
+            true_num_actions = np.count_nonzero(histogram)
+            return true_num_actions
+
+        test_both(["aae","true_num_actions"], true_num_actions)
+
+        def z_mae(data):
+            z     = self.encode(data)
+            z_pre = z[:,0,...]
+            z_suc = z[:,1,...]
+            z2    = z.reshape((-1,2*z.shape[-1]))
+            a     = self.encode_action(z2,**opts)
+            z_suc_aae = self.decode_action([z_pre,a], **opts)
+            return mae(z_suc, z_suc_aae)
+
+        test_both(["aae","z_MAE","vanilla"], z_mae)
+        test_both(["aae","z_MAE","gaussian"],lambda data: z_mae(gaussian(data)))
+        test_both(["aae","z_MAE","salt"],    lambda data: z_mae(salt(data)))
+        test_both(["aae","z_MAE","pepper"],  lambda data: z_mae(pepper(data)))
+
+        def z_prob_bitwise(data):
+            z     = self.encode(data)
+            z_pre = z[:,0,...]
+            z_suc = z[:,1,...]
+            z2    = z.reshape((-1,2*z.shape[-1]))
+            a     = self.encode_action(z2,**opts)
+            z_suc_aae = self.decode_action([z_pre,a], **opts)
+            z_match   = 1-np.abs(z_suc_aae-z_suc)
+            return np.prod(np.mean(z_match,axis=0))
+
+        test_both(["aae","z_prob_bitwise","vanilla"], z_prob_bitwise)
+        test_both(["aae","z_prob_bitwise","gaussian"],lambda data: z_prob_bitwise(gaussian(data)))
+        test_both(["aae","z_prob_bitwise","salt"],    lambda data: z_prob_bitwise(salt(data)))
+        test_both(["aae","z_prob_bitwise","pepper"],  lambda data: z_prob_bitwise(pepper(data)))
+
+        def z_allmatch(data):
+            z     = self.encode(data)
+            z_pre = z[:,0,...]
+            z_suc = z[:,1,...]
+            z2    = z.reshape((-1,2*z.shape[-1]))
+            a     = self.encode_action(z2,**opts)
+            z_suc_aae = self.decode_action([z_pre,a], **opts)
+            z_match   = 1-np.abs(z_suc_aae-z_suc)
+            return np.mean(np.prod(z_match,axis=1))
+
+        test_both(["aae","z_allmatch","vanilla"], z_allmatch)
+        test_both(["aae","z_allmatch","gaussian"],lambda data: z_allmatch(gaussian(data)))
+        test_both(["aae","z_allmatch","salt"],    lambda data: z_allmatch(salt(data)))
+        test_both(["aae","z_allmatch","pepper"],  lambda data: z_allmatch(pepper(data)))
+
+        def action_entropy(data):
+            z     = self.encode(data)
+            z_pre = z[:,0,...]
+            z_suc = z[:,1,...]
+            z2    = z.reshape((-1,2*z.shape[-1]))
+            a     = self.encode_action(z2,**opts)
+
+            A = self.parameters["num_actions"]
+
+            def entropy(j):
+                indices = np.nonzero(a[:,0,j])
+                z       = z_pre[indices[0]]                     # dimension: [b,N]
+                p       = np.mean(z, axis=0)                    # dimension: [N]
+                H       = -np.sum(p*np.log(p+1e-20)+(1-p)*np.log(1-p+1e-20)) # dimension: [] (singleton)
+                return H
+
+            _H_z_given_a = np.array([entropy(j) for j in range(A)])
+            H_z_given_a = np.mean(_H_z_given_a[~np.isnan(_H_z_given_a)])
+            return H_z_given_a
+
+        test_both(["H_z_a",], action_entropy)
 
         return
-    def apply_direct_loss(self,true,pred):
-        if true is None:
-            return pred
-        dummy = Lambda(lambda x: x)
-        if "direct_loss" not in self.parameters:
-            self.parameters["direct_loss"] = "MAE"
-        loss  = K.mean(eval(self.parameters["direct_loss"])(true, pred))
-        loss1 = K.mean(MAE(true, pred))
-        # direct loss should be treated as the real loss
-        dummy.add_loss(K.in_train_phase(loss * self.direct_alpha.variable, loss1))
-        return dummy(pred)
 
-class ActionDumpMixin:
     def dump_actions(self,pre,suc,**kwargs):
         # data: transition data
         num_actions = self.parameters["num_actions"]
@@ -1552,21 +1670,19 @@ class ActionDumpMixin:
 
         def save(name,data):
             print("Saving to",self.local(name))
-            with open(self.local(name), "wb") as f:
+            with open(self.local(name), 'wb') as f:
                 np.savetxt(f,data,"%d")
 
         N=pre.shape[1]
         data = np.concatenate([pre,suc],axis=1)
         actions = self.encode_action(data, **kwargs).round()
-        # [B, 1, A]
 
         histogram = np.squeeze(actions.sum(axis=0,dtype=int))
         print(histogram)
         true_num_actions = np.count_nonzero(histogram)
         print(true_num_actions)
         all_labels = np.zeros((true_num_actions, actions.shape[1], actions.shape[2]), dtype=int)
-        action_ids = np.where(histogram > 0)[0]
-        for i, a in enumerate(action_ids):
+        for i, a in enumerate(np.where(histogram > 0)[0]):
             all_labels[i][0][a] = 1
 
         save("available_actions.csv", np.where(histogram > 0)[0])
@@ -1587,65 +1703,237 @@ class ActionDumpMixin:
         save("actions_both.csv", np.concatenate([data,data_aae], axis=0))
         save("actions_both+ids.csv", np.concatenate([data_byid,data_aae_byid], axis=0))
 
-        # extract the effects.
-        # there were less efficient version 2 and 3, which uses the transition dataset.
-        # this version does not require iterating over hte dataset --- merely twice over all actions.
-        add_effect = self.decode_action([np.zeros((true_num_actions, N)),all_labels], **kwargs)
-        del_effect = 1-self.decode_action([np.ones((true_num_actions, N)),all_labels], **kwargs)
-        save("action_add4.csv",add_effect)
-        save("action_del4.csv",del_effect)
-        save("action_add4+ids.csv",np.concatenate((add_effect,action_ids.reshape([-1,1])), axis=1))
-        save("action_del4+ids.csv",np.concatenate((del_effect,action_ids.reshape([-1,1])), axis=1))
-
-        # extract the preconditions.
-        # it is done by checking if a certain bit is always 0 or always 1.
-        pos = []
-        neg = []
-        for a in action_ids:
-            pre_a = pre[np.where(actions_byid == a)[0]]
-            pos_a =   pre_a.min(axis=0,keepdims=True) # [1,C]
-            neg_a = 1-pre_a.max(axis=0,keepdims=True) # [1,C]
-            pos.append(pos_a)
-            neg.append(neg_a)
-        pos = np.concatenate(pos,axis=0) # [A,C]
-        neg = np.concatenate(neg,axis=0) # [A,C]
-        save("action_pos4.csv",pos)
-        save("action_neg4.csv",neg)
-        save("action_pos4+ids.csv",np.concatenate((pos,action_ids.reshape([-1,1])), axis=1))
-        save("action_neg4+ids.csv",np.concatenate((neg,action_ids.reshape([-1,1])), axis=1))
+        # def generate_aae_action(known_transisitons):
+        #     states = known_transisitons.reshape(-1, N)
+        #     from .util import set_difference
+        #     def repeat_over(array, repeats, axis=0):
+        #         array = np.expand_dims(array, axis)
+        #         array = np.repeat(array, repeats, axis)
+        #         return np.reshape(array,(*array.shape[:axis],-1,*array.shape[axis+2:]))
+        # 
+        #     print("start generating transitions")
+        #     # s1,s2,s3,s1,s2,s3,....
+        #     repeated_states  = repeat_over(states, len(all_labels), axis=0)
+        #     # a1,a1,a1,a2,a2,a2,....
+        #     repeated_actions = np.repeat(all_labels, len(states), axis=0)
+        # 
+        #     y = self.decode_action([repeated_states, repeated_actions], **kwargs).round().astype(np.int8)
+        #     y = np.concatenate([repeated_states, y], axis=1)
+        # 
+        #     print("remove known transitions")
+        #     y = set_difference(y, known_transisitons)
+        #     print("shuffling")
+        #     import numpy.random
+        #     numpy.random.shuffle(y)
+        #     return y
+        # 
+        # transitions = generate_aae_action(data)
+        # # note: transitions are already shuffled, and also do not contain any examples in data.
+        # actions      = self.encode_action(transitions, **kwargs).round()
+        # actions_byid = to_id(actions)
+        # 
+        # # ensure there are enough test examples
+        # separation = min(len(data)*10,len(transitions)-len(data))
+        # 
+        # # fake dataset is used only for the training.
+        # fake_transitions  = transitions[:separation]
+        # fake_actions_byid = actions_byid[:separation]
+        # 
+        # # remaining data are used only for the testing.
+        # test_transitions  = transitions[separation:]
+        # test_actions_byid = actions_byid[separation:]
+        # 
+        # print(fake_transitions.shape, test_transitions.shape)
+        # 
+        # save("fake_actions.csv",fake_transitions)
+        # save("fake_actions+ids.csv",np.concatenate((fake_transitions,fake_actions_byid), axis=1))
+        # 
+        # from .util import puzzle_module
+        # p = puzzle_module(self.path)
+        # print("decoding pre")
+        # pre_images = self.decode(test_transitions[:,:N],**kwargs)
+        # print("decoding suc")
+        # suc_images = self.decode(test_transitions[:,N:],**kwargs)
+        # print("validating transitions")
+        # valid    = p.validate_transitions([pre_images, suc_images],**kwargs)
+        # invalid  = np.logical_not(valid)
+        # 
+        # valid_transitions  = test_transitions [valid][:len(data)] # reduce the amount of data to reduce runtime
+        # valid_actions_byid = test_actions_byid[valid][:len(data)]
+        # invalid_transitions  = test_transitions [invalid][:len(data)] # reduce the amount of data to reduce runtime
+        # invalid_actions_byid = test_actions_byid[invalid][:len(data)]
+        # 
+        # save("valid_actions.csv",valid_transitions)
+        # save("valid_actions+ids.csv",np.concatenate((valid_transitions,valid_actions_byid), axis=1))
+        # save("invalid_actions.csv",invalid_transitions)
+        # save("invalid_actions+ids.csv",np.concatenate((invalid_transitions,invalid_actions_byid), axis=1))
         return
 
-class ConditionalEffectMixin(BaseActionMixin,DirectLossMixin):
+
+# action mapping variations
+
+class DetActionMixin:
+    "Deterministic mapping from a state pair to an action"
+    def build_action_encoder(self):
+        return [
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
+            Sequential([
+                        Dense(self.parameters['num_actions']),
+                        self.build_gs(N=1,
+                                      M=self.parameters['num_actions'],
+                                      offset=self.parameters["aae_delay"],),
+            ]),
+        ]
+    def _action(self,z_pre,z_suc):
+        self.action_encoder_net = self.build_action_encoder()
+
+        N = self.parameters['N']
+        transition = Input(shape=(N*2,))
+        pre2 = wrap(transition, transition[:,:N])
+        suc2 = wrap(transition, transition[:,N:])
+        self.action = Model(transition, ConditionalSequential(self.action_encoder_net, pre2, axis=1)(suc2))
+
+        return ConditionalSequential(self.action_encoder_net, z_pre, axis=1)(z_suc)
+
+
+# effect mapping variations
+
+class DirectLossMixin:
+    "Additional loss for the latent space successor prediction."
+    def _build(self,input_shape):
+        super()._build(input_shape)
+
+        self.direct_alpha = StepSchedule(schedule={
+            0:0,
+            (self.parameters["epoch"]*self.parameters["direct_delay"]):self.parameters["direct"],
+        })
+        self.callbacks.append(LambdaCallback(on_epoch_end=self.direct_alpha.update))
+
+        return
+    def apply_direct_loss(self,true,pred):
+        dummy = Lambda(lambda x: x)
+
+        loss = K.mean(mae(true, pred))
+        def direct(x, y):
+            return loss
+
+        self.metrics.append(direct)
+
+        # direct loss should be treated as the real loss
+        dummy.add_loss(K.in_train_phase(loss * self.direct_alpha.variable, loss))
+        return dummy(pred)
+
+class ActionDumpMixin:
+    def dump_actions(self,pre,suc,**kwargs):
+        # data: transition data
+        num_actions = self.parameters["num_actions"]
+        def to_id(actions):
+            return (actions * np.arange(num_actions)).sum(axis=-1,dtype=int)
+
+        def save(name,data):
+            print("Saving to",self.local(name))
+            with open(self.local(name), 'wb') as f:
+                np.savetxt(f,data,"%d")
+
+        N=pre.shape[1]
+        data = np.concatenate([pre,suc],axis=1)
+        actions = self.encode_action(data, **kwargs).round()
+
+        histogram = np.squeeze(actions.sum(axis=0,dtype=int))
+        print(histogram)
+        true_num_actions = np.count_nonzero(histogram)
+        print(true_num_actions)
+        all_labels = np.zeros((true_num_actions, actions.shape[1], actions.shape[2]), dtype=int)
+        for i, a in enumerate(np.where(histogram > 0)[0]):
+            all_labels[i][0][a] = 1
+
+        save("available_actions.csv", np.where(histogram > 0)[0])
+
+        actions_byid = to_id(actions)
+
+        data_byid = np.concatenate((data,actions_byid), axis=1)
+
+        save("actions.csv", data)
+        save("actions+ids.csv", data_byid)
+
+        data_aae = np.concatenate([pre,self.decode_action([pre,actions], **kwargs)], axis=1)
+
+        data_aae_byid = np.concatenate((data_aae,actions_byid), axis=1)
+        save("actions_aae.csv", data_aae)
+        save("actions_aae+ids.csv", data_aae_byid)
+
+        save("actions_both.csv", np.concatenate([data,data_aae], axis=0))
+        save("actions_both+ids.csv", np.concatenate([data_byid,data_aae_byid], axis=0))
+
+        all_actions_byid = to_id(all_labels)
+
+        def extract_effect_from_transitions(transitions):
+            pre = transitions[:,:N]
+            suc = transitions[:,N:]
+            data_diff = suc - pre
+            data_add  = np.maximum(0, data_diff)
+            data_del  = -np.minimum(0, data_diff)
+
+            add_effect = np.zeros((true_num_actions, N))
+            del_effect = np.zeros((true_num_actions, N))
+
+            for i, a in enumerate(np.where(histogram > 0)[0]):
+                indices = np.where(actions_byid == a)[0]
+                add_effect[i] = np.amax(data_add[indices], axis=0)
+                del_effect[i] = np.amax(data_del[indices], axis=0)
+
+            return add_effect, del_effect, data_diff
+
+        # effects obtained from the latent vectors
+        add_effect2, del_effect2, diff2 = extract_effect_from_transitions(data)
+
+        save("action_add2.csv",add_effect2)
+        save("action_del2.csv",del_effect2)
+        save("action_add2+ids.csv",np.concatenate((add_effect2,all_actions_byid), axis=1))
+        save("action_del2+ids.csv",np.concatenate((del_effect2,all_actions_byid), axis=1))
+        save("diff2+ids.csv",np.concatenate((diff2,actions_byid), axis=1))
+
+        data_aae = np.concatenate([pre,self.decode_action([pre,actions], **kwargs)], axis=1)
+
+        # effects obtained from the latent vectors, but the successor uses the ones coming from the AAE
+        add_effect3, del_effect3, diff3 = extract_effect_from_transitions(data_aae)
+
+        save("action_add3.csv",add_effect3)
+        save("action_del3.csv",del_effect3)
+        save("action_add3+ids.csv",np.concatenate((add_effect3,all_actions_byid), axis=1))
+        save("action_del3+ids.csv",np.concatenate((del_effect3,all_actions_byid), axis=1))
+        save("diff3+ids.csv",np.concatenate((diff3,actions_byid), axis=1))
+
+        return
+
+class ConditionalEffectMixin(BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends on both the current state and the action labels -- Same as AAE in AAAI18."
     def _apply(self,z_pre,z_suc,action):
 
         self.action_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())),
-                self.build_bc(),
+                rounded_sigmoid(),
                 Reshape(self.zdim()),
             ])
         ]
 
         z_suc_aae = ConditionalSequential(self.action_decoder_net, z_pre, axis=1)(flatten(action))
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
+
+        pre2 = Input(shape=self.zdim())
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
+        self.apply  = Model([pre2,act2], ConditionalSequential(self.action_decoder_net, pre2, axis=1)(flatten(act2)))
+
         return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
-        pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
-        self.apply  = Model([pre2,act2], ConditionalSequential(self.action_decoder_net, pre2, axis=1)(flatten(act2)))
-        return
-
-
-class BoolMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+class BoolMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are directly modeled as binary min/max."
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())*3),
                 Reshape((*self.zdim(),3)),
@@ -1659,25 +1947,21 @@ class BoolMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
         z_del     = wrap(z_eff, z_eff[...,1])
         z_suc_aae = wrap(z_pre, K.minimum(1-z_del, K.maximum(z_add, z_pre)))
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2     = Sequential(self.eff_decoder_net)(flatten(act2))
         add2     = wrap(eff2, eff2[...,0])
         del2     = wrap(eff2, eff2[...,1])
         self.apply  = Model([pre2,act2], wrap(pre2, K.minimum(1-del2, K.maximum(add2, pre2))))
-        return
+        return z_suc_aae
 
-
-class BoolSmoothMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+class BoolSmoothMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are directly modeled as binary smooth min/max."
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())*3),
                 Reshape((*self.zdim(),3)),
@@ -1691,24 +1975,21 @@ class BoolSmoothMinMaxEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixi
         z_del     = wrap(z_eff, z_eff[...,1])
         z_suc_aae = wrap(z_pre, smooth_min(1-z_del, smooth_max(z_add, z_pre)))
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2     = Sequential(self.eff_decoder_net)(flatten(act2))
         add2     = wrap(eff2, eff2[...,0])
         del2     = wrap(eff2, eff2[...,1])
         self.apply  = Model([pre2,act2], wrap(pre2, smooth_min(1-del2, smooth_max(add2, pre2))))
-        return
+        return z_suc_aae
 
-class BoolAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+class BoolAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are directly modeled as binary smooth min/max."
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())*3),
                 Reshape((*self.zdim(),3)),
@@ -1720,28 +2001,25 @@ class BoolAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
         z_eff     = Sequential(self.eff_decoder_net)(flatten(action))
         z_add     = wrap(z_eff, z_eff[...,0])
         z_del     = wrap(z_eff, z_eff[...,1])
-        z_suc_aae = wrap(z_pre, self.build_bc()(z_pre - 0.5 + z_add - z_del))
+        z_suc_aae = wrap(z_pre, rounded_sigmoid()(z_pre - 0.5 + z_add - z_del))
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2     = Sequential(self.eff_decoder_net)(flatten(act2))
         add2     = wrap(eff2, eff2[...,0])
         del2     = wrap(eff2, eff2[...,1])
-        self.apply  = Model([pre2,act2], wrap(pre2, self.build_bc()(pre2 - 0.5 + add2 - del2)))
-        return
+        self.apply  = Model([pre2,act2], wrap(pre2, rounded_sigmoid()(pre2 - 0.5 + add2 - del2)))
+        return z_suc_aae
 
-class NormalizedLogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+class NormalizedLogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are implicitly modeled by back2logit technique with batchnorm."
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
-                Dense(np.prod(self.zdim()),use_bias=False),
+                Dense(np.prod(self.zdim())),
                 BN(),
             ])
         ]
@@ -1750,27 +2028,25 @@ class NormalizedLogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMi
         l_eff     = Sequential(self.eff_decoder_net)(flatten(action))
         l_pre = self.scaling(z_pre)
         l_suc_aae = add([l_pre,l_eff])
-        z_suc_aae = self.build_bc()(l_suc_aae)
+        z_suc_aae = rounded_sigmoid()(l_suc_aae)
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2 = Sequential(self.eff_decoder_net)(flatten(act2))
         lpre2 = self.scaling(pre2)
         lsuc2 = add([lpre2,eff2])
-        suc2 = self.build_bc()(lsuc2)
-        self.apply  = Model([pre2,act2], suc2)
-        return
+        suc2 = rounded_sigmoid()(lsuc2)
 
-class LogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+        self.apply  = Model([pre2,act2], suc2)
+        return z_suc_aae
+
+class LogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are implicitly modeled by back2logit technique, but without batchnorm (s_t shifted from [0,1] to [-1/2,1/2].)"
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())),
             ])
@@ -1780,27 +2056,25 @@ class LogitAddEffectMixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
         l_eff     = Sequential(self.eff_decoder_net)(flatten(action))
         l_pre = self.scaling(z_pre)
         l_suc_aae = add([l_pre,l_eff])
-        z_suc_aae = self.build_bc()(l_suc_aae)
+        z_suc_aae = rounded_sigmoid()(l_suc_aae)
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2 = Sequential(self.eff_decoder_net)(flatten(act2))
         lpre2 = self.scaling(pre2)
         lsuc2 = add([lpre2,eff2])
-        suc2 = self.build_bc()(lsuc2)
-        self.apply  = Model([pre2,act2], suc2)
-        return
+        suc2 = rounded_sigmoid()(lsuc2)
 
-class LogitAddEffect2Mixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
+        self.apply  = Model([pre2,act2], suc2)
+        return z_suc_aae
+
+class LogitAddEffect2Mixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin,HammingLoggerMixin):
     "The effect depends only on the action labels. Add/delete effects are implicitly modeled by back2logit technique. Uses batchnorm in effect, but not in s_t (shifted from [0,1] to [-1/2,1/2].)"
     def _apply(self,z_pre,z_suc,action):
 
         self.eff_decoder_net = [
-            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"]-1)],
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
             Sequential([
                 Dense(np.prod(self.zdim())),
                 BN(),
@@ -1811,20 +2085,50 @@ class LogitAddEffect2Mixin(ActionDumpMixin,BaseActionMixin,DirectLossMixin):
         l_eff     = Sequential(self.eff_decoder_net)(flatten(action))
         l_pre = self.scaling(z_pre)
         l_suc_aae = add([l_pre,l_eff])
-        z_suc_aae = self.build_bc()(l_suc_aae)
+        z_suc_aae = rounded_sigmoid()(l_suc_aae)
         z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
-        return z_suc_aae
 
-    def _build_aux(self, input_shape):
-        super()._build_aux(input_shape)
         pre2 = Input(shape=self.zdim())
-        act2 = Input(shape=(1,self.parameters["num_actions"],))
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
         eff2 = Sequential(self.eff_decoder_net)(flatten(act2))
         lpre2 = self.scaling(pre2)
         lsuc2 = add([lpre2,eff2])
-        suc2 = self.build_bc()(lsuc2)
+        suc2 = rounded_sigmoid()(lsuc2)
+
         self.apply  = Model([pre2,act2], suc2)
-        return
+        return z_suc_aae
+
+class NoSucNormalizedLogitAddEffectMixin(ActionDumpMixin,NoSucBaseActionMixin,DirectLossMixin,HammingLoggerMixin):
+    """Same as NormalizedLogitAddEffectMixin, but the action prediction takes only the current state.
+Code-wise, there is only the inheritance difference.
+The effect depends only on the action labels. Add/delete effects are implicitly modeled by back2logit technique with batchnorm."""
+    def _apply(self,z_pre,z_suc,action):
+
+        self.eff_decoder_net = [
+            *[self.build_action_fc_unit() for i in range(self.parameters["aae_depth"])],
+            Sequential([
+                Dense(np.prod(self.zdim())),
+                BN(),
+            ])
+        ]
+        self.scaling = BN()
+
+        l_eff     = Sequential(self.eff_decoder_net)(flatten(action))
+        l_pre = self.scaling(z_pre)
+        l_suc_aae = add([l_pre,l_eff])
+        z_suc_aae = rounded_sigmoid()(l_suc_aae)
+        z_suc_aae = self.apply_direct_loss(z_suc, z_suc_aae)
+
+        pre2 = Input(shape=self.zdim())
+        act2 = Input(shape=(1,self.parameters['num_actions'],))
+        eff2 = Sequential(self.eff_decoder_net)(flatten(act2))
+        lpre2 = self.scaling(pre2)
+        lsuc2 = add([lpre2,eff2])
+        suc2 = rounded_sigmoid()(lsuc2)
+
+        self.apply  = Model([pre2,act2], suc2)
+        return z_suc_aae
+
 
 
 # Zero-sup SAE ###############################################################
@@ -1842,46 +2146,36 @@ class ZeroSuppressConvolutional2StateAE(ZeroSuppressMixin, ConvolutionalDecoderM
     pass
 # Transition SAE ################################################################
 
-class VanillaTransitionAE(              ZeroSuppressMixin, ConcreteLatentMixin, ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
+class VanillaTransitionAE(              ZeroSuppressMixin, ConcreteLatentMixin, TransitionAE):
     pass
 
 # earlier attempts to "sparcify" the transisions. No longer used
-class HammingTransitionAE(HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
+class HammingTransitionAE(HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, TransitionAE):
     pass
-class CosineTransitionAE (CosineMixin,  ZeroSuppressMixin, ConcreteLatentMixin, ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
+class CosineTransitionAE (CosineMixin,  ZeroSuppressMixin, ConcreteLatentMixin, TransitionAE):
     pass
-class PoissonTransitionAE(PoissonMixin, ZeroSuppressMixin, ConcreteLatentMixin, ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
+class PoissonTransitionAE(PoissonMixin, ZeroSuppressMixin, ConcreteLatentMixin, TransitionAE):
     pass
 
 
 # IJCAI2020 papers
-class ConcreteDetConditionalEffectTransitionAE              (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, ConditionalEffectMixin,        ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Vanilla Space AE"""
+class ConcreteDetConditionalEffectTransitionAE              (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, ConditionalEffectMixin, TransitionAE):
     pass
-class ConcreteDetBoolMinMaxEffectTransitionAE               (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolMinMaxEffectMixin,         ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Cube-Space AE with naive discrete effects (not BTL)"""
+class ConcreteDetBoolMinMaxEffectTransitionAE               (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolMinMaxEffectMixin, TransitionAE):
     pass
-class ConcreteDetBoolSmoothMinMaxEffectTransitionAE         (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolSmoothMinMaxEffectMixin,   ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Cube-Space AE with naive discrete effects with smooth min/max"""
+class ConcreteDetBoolSmoothMinMaxEffectTransitionAE         (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolSmoothMinMaxEffectMixin, TransitionAE):
     pass
-class ConcreteDetBoolAddEffectTransitionAE                  (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolAddEffectMixin,            ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Cube-Space AE with naive discrete effects (not BTL). Effect is one-hot from add/del/nop"""
+class ConcreteDetBoolAddEffectTransitionAE                  (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, BoolAddEffectMixin, TransitionAE):
     pass
-class ConcreteDetLogitAddEffectTransitionAE                 (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, LogitAddEffectMixin,           ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Cube-Space AE without BatchNorm"""
+class ConcreteDetLogitAddEffectTransitionAE                 (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, LogitAddEffectMixin, TransitionAE):
     pass
-class ConcreteDetLogitAddEffect2TransitionAE                (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, LogitAddEffect2Mixin,          ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Cube-Space AE without BatchNorm for the current state but with BatchNorm for effects"""
+class ConcreteDetLogitAddEffect2TransitionAE                (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, LogitAddEffect2Mixin, TransitionAE):
     pass
-class ConcreteDetNormalizedLogitAddEffectTransitionAE       (ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, NormalizedLogitAddEffectMixin, ConvolutionalEncoderMixin, TransitionWrapper, StateAE):
-    """Final Cube-Space AE implementation"""
+class ConcreteDetNormalizedLogitAddEffectTransitionAE       (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, NormalizedLogitAddEffectMixin, TransitionAE):
+    pass
+class ConcreteDetNoSucNormalizedLogitAddEffectTransitionAE  (HammingMixin, ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, NoSucNormalizedLogitAddEffectMixin, TransitionAE):
     pass
 
-
-
-class FullyConvolutionalCubeSpaceAE(ZeroSuppressMixin, ConcreteLatentMixin, DetActionMixin, NormalizedLogitAddEffectMixin, FullyConvolutionalAEMixin, TransitionWrapper, StateAE):
-    """Fully convolutional Cube-Space AE, cannot specify the latent space size (depends on the input size)"""
-    pass
 
 
 # state/action discriminator ####################################################
@@ -1894,9 +2188,9 @@ class Discriminator(Network):
         y = Sequential([
             flatten,
             *[Sequential([BN(),
-                          Dense(self.parameters["layer"],activation=self.parameters["activation"]),
-                          Dropout(self.parameters["dropout"]),])
-              for i in range(self.parameters["num_layers"]) ],
+                          Dense(self.parameters['layer'],activation=self.parameters['activation']),
+                          Dropout(self.parameters['dropout']),])
+              for i in range(self.parameters['num_layers']) ],
             Dense(1,activation="sigmoid")
         ])(x)
 
@@ -1918,7 +2212,7 @@ class PUDiscriminator(Discriminator):
     """Subclass for PU-learning."""
     def _load(self):
         super()._load()
-        K.set_value(self.c, self.parameters["c"])
+        K.set_value(self.c, self.parameters['c'])
 
     def _build(self,input_shape):
         super()._build(input_shape)
@@ -1954,7 +2248,7 @@ class PUDiscriminator(Discriminator):
             c = s.mean()
             print("PU constant c =", c)
             K.set_value(self.c, c)
-            self.parameters["c"] = float(c)
+            self.parameters['c'] = float(c)
             # prevent saving before setting c
             if save:
                 self.save()
@@ -1967,19 +2261,19 @@ class SimpleCAE(AE):
         return [Reshape((*input_shape,1)),
                 GaussianNoise(0.1),
                 BN(),
-                Convolution2D(self.parameters["clayer"],(3,3),
-                              activation=self.parameters["activation"],padding="same", use_bias=False),
-                Dropout(self.parameters["dropout"]),
+                Convolution2D(self.parameters['clayer'],(3,3),
+                              activation=self.parameters['activation'],padding='same', use_bias=False),
+                Dropout(self.parameters['dropout']),
                 BN(),
                 MaxPooling2D((2,2)),
-                Convolution2D(self.parameters["clayer"],(3,3),
-                              activation=self.parameters["activation"],padding="same", use_bias=False),
-                Dropout(self.parameters["dropout"]),
+                Convolution2D(self.parameters['clayer'],(3,3),
+                              activation=self.parameters['activation'],padding='same', use_bias=False),
+                Dropout(self.parameters['dropout']),
                 BN(),
                 MaxPooling2D((2,2)),
-                Convolution2D(self.parameters["clayer"],(3,3),
-                              activation=self.parameters["activation"],padding="same", use_bias=False),
-                Dropout(self.parameters["dropout"]),
+                Convolution2D(self.parameters['clayer'],(3,3),
+                              activation=self.parameters['activation'],padding='same', use_bias=False),
+                Dropout(self.parameters['dropout']),
                 BN(),
                 MaxPooling2D((2,2)),
                 flatten,]
@@ -1987,13 +2281,13 @@ class SimpleCAE(AE):
     def build_decoder(self,input_shape):
         data_dim = np.prod(input_shape)
         return [
-            Dense(self.parameters["layer"], activation="relu", use_bias=False),
+            Dense(self.parameters['layer'], activation='relu', use_bias=False),
             BN(),
-            Dropout(self.parameters["dropout"]),
-            Dense(self.parameters["layer"], activation="relu", use_bias=False),
+            Dropout(self.parameters['dropout']),
+            Dense(self.parameters['layer'], activation='relu', use_bias=False),
             BN(),
-            Dropout(self.parameters["dropout"]),
-            Dense(data_dim, activation="sigmoid"),
+            Dropout(self.parameters['dropout']),
+            Dense(data_dim, activation='sigmoid'),
             Reshape(input_shape),]
 
     def _build(self,input_shape):
@@ -2048,30 +2342,30 @@ def combined_sd(states,sae,cae,sd3,**kwargs):
 class ActionAE(AE):
     """A network which autoencodes the difference information.
 
-    State transitions are not a 1-to-1 mapping in a sense that
-    there are multiple applicable actions. So you cannot train a newtork that directly learns
-    a transition S -> T .
+State transitions are not a 1-to-1 mapping in a sense that
+there are multiple applicable actions. So you cannot train a newtork that directly learns
+a transition S -> T .
 
-    We also do not have action labels, so we need to cluster the actions in an unsupervised manner.
+We also do not have action labels, so we need to cluster the actions in an unsupervised manner.
 
-    This network trains a bidirectional mapping of (S,T) -> (S,A) -> (S,T), given that 
-    a state transition is a function conditioned by the before-state s.
+This network trains a bidirectional mapping of (S,T) -> (S,A) -> (S,T), given that 
+a state transition is a function conditioned by the before-state s.
 
-    It is not useful to learn a normal autoencoder (S,T) -> Z -> (S,T) because we cannot separate the
-    condition and the action label.
+It is not useful to learn a normal autoencoder (S,T) -> Z -> (S,T) because we cannot separate the
+condition and the action label.
 
-    We again use gumbel-softmax for representing A."""
+We again use gumbel-softmax for representing A."""
     def build_encoder(self,input_shape):
         return [
             *[
                 Sequential([
-                    Dense(self.parameters["aae_width"], activation=self.parameters["aae_activation"], use_bias=False),
+                    Dense(self.parameters['aae_width'], activation=self.parameters['aae_activation'], use_bias=False),
                     BN(),
-                    Dropout(self.parameters["dropout"]),])
-                for i in range(self.parameters["aae_depth"]-1)
+                    Dropout(self.parameters['dropout']),])
+                for i in range(self.parameters['aae_depth'])
             ],
             Sequential([
-                    Dense(self.parameters["N"]*self.parameters["M"]),
+                    Dense(self.parameters['N']*self.parameters['M']),
                     self.build_gs(),
             ]),
         ]
@@ -2081,21 +2375,21 @@ class ActionAE(AE):
         return [
             *[
                 Sequential([
-                    Dense(self.parameters["aae_width"], activation=self.parameters["aae_activation"], use_bias=False),
+                    Dense(self.parameters['aae_width'], activation=self.parameters['aae_activation'], use_bias=False),
                     BN(),
-                    Dropout(self.parameters["dropout"]),])
-                for i in range(self.parameters["aae_depth"]-1)
+                    Dropout(self.parameters['dropout']),])
+                for i in range(self.parameters['aae_depth'])
             ],
             Sequential([
                 Dense(data_dim),
-                self.build_bc(),
+                rounded_sigmoid(),
                 Reshape(input_shape),]),]
 
     def _build(self,input_shape):
 
         dim = np.prod(input_shape) // 2
         print("{} latent bits".format(dim))
-        M, N = self.parameters["M"], self.parameters["N"]
+        M, N = self.parameters['M'], self.parameters['N']
 
         x = Input(shape=input_shape)
 
@@ -2125,7 +2419,7 @@ class ActionAE(AE):
         self.autoencoder = self.net
 
     def encode_action(self,data,**kwargs):
-        M, N = self.parameters["M"], self.parameters["N"]
+        M, N = self.parameters['M'], self.parameters['N']
         return self.encode(data,**kwargs)[1]
 
     def report(self,train_data,
@@ -2136,7 +2430,7 @@ class ActionAE(AE):
         test_data     = train_data if test_data is None else test_data
         train_data_to = train_data if train_data_to is None else train_data_to
         test_data_to  = test_data  if test_data_to is None else test_data_to
-        opts = {"verbose":0,"batch_size":batch_size}
+        opts = {'verbose':0,'batch_size':batch_size}
         def test_both(msg, fn):
             print(msg.format(fn(train_data)))
             if test_data is not None:
@@ -2155,6 +2449,7 @@ class ActionAE(AE):
         b = np.round(z)
         by = self.decode([x[:,:dim],b])
 
+        from .util.plot import plot_grid, squarify
         x_pre, x_suc = squarify(x[:,:dim]), squarify(x[:,dim:])
         y_pre, y_suc = squarify(y[:,:dim]), squarify(y[:,dim:])
         by_pre, by_suc = squarify(by[:,:dim]), squarify(by[:,dim:])
@@ -2165,15 +2460,15 @@ class ActionAE(AE):
             y_pre_im, y_suc_im = sae.decode(y[:,:dim]), sae.decode(y[:,dim:])
             by_pre_im, by_suc_im = sae.decode(by[:,:dim]), sae.decode(by[:,dim:])
             y_suc_r_im, by_suc_r_im = sae.decode(y[:,dim:].round()), sae.decode(by[:,dim:].round())
-            _plot(self.local(path),
-                  (x_pre_im, x_suc_im, squarify(np.squeeze(z)),
-                   y_pre_im, y_suc_im, y_suc_r_im, squarify(np.squeeze(b)),
-                   by_pre_im, by_suc_im, by_suc_r_im))
+            images = []
+            for seq in zip(x_pre_im, x_suc_im, squarify(np.squeeze(z)), y_pre_im, y_suc_im, y_suc_r_im, squarify(np.squeeze(b)), by_pre_im, by_suc_im, by_suc_r_im):
+                images.extend(seq)
+            plot_grid(images, w=10, path=self.local(path), verbose=verbose)
         else:
-            _plot(self.local(path),
-                  (x_pre, x_suc, squarify(np.squeeze(z)),
-                   y_pre, y_suc, y_suc_r, squarify(np.squeeze(b)),
-                   by_pre, by_suc, by_suc_r))
+            images = []
+            for seq in zip(x_pre, x_suc, squarify(np.squeeze(z)), y_pre, y_suc, y_suc_r, squarify(np.squeeze(b)), by_pre, by_suc, by_suc_r):
+                images.extend(seq)
+            plot_grid(images, w=10, path=self.local(path), verbose=verbose)
         return x,z,y,b,by
 
 class CubeActionAE(ActionAE):
@@ -2183,10 +2478,10 @@ class CubeActionAE(ActionAE):
         return [
             *[
                 Sequential([
-                    Dense(self.parameters["aae_width"], activation=self.parameters["aae_activation"], use_bias=False),
+                    Dense(self.parameters['aae_width'], activation=self.parameters['aae_activation'], use_bias=False),
                     BN(),
-                    Dropout(self.parameters["dropout"]),])
-                for i in range(self.parameters["aae_depth"]-1)
+                    Dropout(self.parameters['dropout']),])
+                for i in range(self.parameters['aae_depth'])
             ],
             Sequential([
                 Dense(data_dim,use_bias=False),
@@ -2198,7 +2493,7 @@ class CubeActionAE(ActionAE):
 
         dim = np.prod(input_shape) // 2
         print("{} latent bits".format(dim))
-        M, N = self.parameters["M"], self.parameters["N"]
+        M, N = self.parameters['M'], self.parameters['N']
 
         x = Input(shape=input_shape)
 
@@ -2215,7 +2510,7 @@ class CubeActionAE(ActionAE):
         l_pre = scaling(pre)
 
         l_suc = add([l_eff,l_pre])
-        suc_reconstruction = self.build_bc()(l_suc)
+        suc_reconstruction = rounded_sigmoid()(l_suc)
 
         y = Concatenate(axis=1)([pre,suc_reconstruction])
 
@@ -2224,7 +2519,7 @@ class CubeActionAE(ActionAE):
         l_pre2 = scaling(pre2)
         l_eff2 = Sequential(_decoder)(flatten(action2))
         l_suc2 = add([l_eff2,l_pre2])
-        suc_reconstruction2 = self.build_bc()(l_suc2)
+        suc_reconstruction2 = rounded_sigmoid()(l_suc2)
         y2 = Concatenate(axis=1)([pre2,suc_reconstruction2])
 
         self.metrics.append(MAE)
@@ -2250,9 +2545,9 @@ class ActionDiscriminator(Discriminator):
             _y = Sequential([
                 flatten,
                 *[Sequential([BN(),
-                              Dense(self.parameters["layer"],activation=self.parameters["activation"]),
-                              Dropout(self.parameters["dropout"]),])
-              for i in range(self.parameters["num_layers"]) ],
+                              Dense(self.parameters['layer'],activation=self.parameters['activation']),
+                              Dropout(self.parameters['dropout']),])
+              for i in range(self.parameters['num_layers']) ],
                 Dense(1,activation="sigmoid")
             ])(_x)
             _m = Model(_x,_y,name="action_"+str(i))
@@ -2266,4 +2561,63 @@ class ActionDiscriminator(Discriminator):
 
 class ActionPUDiscriminator(PUDiscriminator,ActionDiscriminator):
     pass
+
+# imbalanced data WIP ###############################################################
+
+# In general, there are more invalid data than valid data. These kinds of
+# imbalanced datasets always make it difficult to train a classifier.
+# Theoretically, the most promising way for this problem is Undersampling + bagging.
+# Yeah I know, I am not a statistician. But I have a true statistician friend !
+# TBD : add reference to that paper (I forgot).
+
+# Ultimately this implementation was not used during AAAI submission.
+
+class UBDiscriminator(Discriminator):
+    def _build(self,input_shape):
+        x = Input(shape=input_shape)
+
+        self.discriminators = []
+        for i in range(self.parameters['bagging']):
+            d = Discriminator(self.path+"/"+str(i),self.parameters)
+            d.build(input_shape)
+            self.discriminators.append(d)
+
+        y = average([ d.net(x) for d in self.discriminators ])
+        y = wrap(y,K.round(y))
+        self.net = Model(x,y)
+        self.net.compile(optimizer='adam',loss=bce)
+
+    def train(self,train_data,
+              train_data_to=None,
+              val_data=None,
+              val_data_to=None,
+              *args,**kwargs):
+
+        self.build(train_data.shape[1:])
+
+        num   = len(val_data_to)
+        num_p = np.count_nonzero(val_data_to)
+        num_n = num-num_p
+        assert num_n > num_p
+        print("positive : negative = ",num_p,":",num_n,"negative ratio",num_n/num_p)
+
+        ind_p = np.where(val_data_to == 1)[0]
+        ind_n = np.where(val_data_to == 0)[0]
+
+        from numpy.random import shuffle
+        shuffle(ind_n)
+
+        per_bag = num_n // len(self.discriminators)
+        for i, d in enumerate(self.discriminators):
+            print("training",i+1,"/",len(self.discriminators),"th discriminator")
+            ind_n_per_bag = ind_n[per_bag*i:per_bag*(i+1)]
+            ind = np.concatenate((ind_p,ind_n_per_bag))
+            d.train(train_data[ind],
+                    train_data_to=train_data_to[ind],
+                    val_data=val_data,
+                    val_data_to=val_data_to,
+                    *args,**kwargs)
+
+    def discriminate(self,data,**kwargs):
+        return self.net.predict(data,**kwargs)
 

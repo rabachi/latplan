@@ -47,15 +47,17 @@ def plot_grid2(images,w=10,path="plan.png",verbose=False):
 def plot_ae(ae,data,path):
     return ae.plot(data,path)
 
-def squarify(x,axis=-1):
-    before, N, after = x.shape[:axis], x.shape[axis], x.shape[axis+1:]
-    if axis == -1:
-        after = tuple()
+def squarify(bitvectors):
+    batch, N = bitvectors.shape
     import math
-    l = math.ceil(math.sqrt(N))
+    root = math.sqrt(N)
+    l1 = math.floor(root)
 
-    if l*l == N:
-        return x.reshape((*before,l,l,*after))
+    if l1*l1 == N:
+        return bitvectors.reshape((-1,l1,l1))
     else:
-        size = l*l
-        return np.concatenate((x,np.ones((*before,size-N,*after))),axis=axis).reshape((*before,l,l,*after))
+        l2 = math.ceil(root)
+        size = l2*l2
+        return np.concatenate((bitvectors,np.ones((bitvectors.shape[0],size-N))),axis=1).reshape((-1,l2,l2))
+    
+    
