@@ -33,38 +33,38 @@ fn (){
 # "valid":valid,
 
 fn-search (){
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.search // 10000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"gc\")) | .[0].statistics.search // 10000), (map(select(.heuristics==\"lama\")) | .[0].statistics.search // 10000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 
 fn-initialization (){
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.initialization // 10000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"gc\")) | .[0].statistics.initialization // 10000), (map(select(.heuristics==\"lama\")) | .[0].statistics.initialization // 10000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 
 fn-total (){
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.total // 10000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"gc\")) | .[0].statistics.total // 10000), (map(select(.heuristics==\"lama\")) | .[0].statistics.total // 10000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 
 fn-total2 (){
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.search+.[0].statistics.initialization // 10000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"mands\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"gc\")) | .[0].statistics.search+.[0].statistics.initialization // 10000), (map(select(.heuristics==\"lama\")) | .[0].statistics.search+.[0].statistics.initialization // 10000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 
 fn-expanded (){
     
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.expanded // 100000000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"gc\")) | .[0].statistics.expanded // 100000000), (map(select(.heuristics==\"lama\")) | .[0].statistics.expanded // 100000000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 fn-evaluated (){
     
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.evaluated // 100000000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"gc\")) | .[0].statistics.evaluated // 100000000), (map(select(.heuristics==\"lama\")) | .[0].statistics.evaluated // 100000000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 fn-generated (){
     
-    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.generated // 100000000) ] )" \
+    fn "group_by([.noise, .domain, .problem, .domainfile[-1] ]) | map([ .[0].noise, .[0].domain, .[0].problem, .[0].domainfile[-1], (map(select(.heuristics==\"blind\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"mands\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"lmcut\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"gc\")) | .[0].statistics.generated // 100000000), (map(select(.heuristics==\"lama\")) | .[0].statistics.generated // 100000000) ] )" \
         | jq -r -c '.[]' | sed 's/\(\[\|\]\)//g'
 }
 
