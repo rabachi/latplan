@@ -389,7 +389,7 @@ Poor python coders cannot enjoy the cleanness of CLOS :before, :after, :around m
         self.loaded = True
         if save:
             self.save()
-        self.build_aux(train_data.shape[1:]) # depends on self.optimizer
+        self.build_aux(train_data[0].shape[1:]) # depends on self.optimizer
         return self
 
     def evaluate(self,*args,**kwargs):
