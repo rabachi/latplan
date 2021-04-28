@@ -139,7 +139,7 @@ def generate(p, ics, gcs, prob_vis, *args):
         goals = noise_fn(goals)
         for i,init in enumerate(inits):
             for j,goal in enumerate(goals):
-                d = "{}/{}/{:03d}-{:03d}-{:03d}".format(output_dir,p.__name__,steps,i,j)
+                d = "{}/{}/planning_{}/{:03d}-{:03d}-{:03d}".format(output_dir,p.__name__,prob_vis,steps,i,j)
                 try:
                     subprocess.call(["mv",d,d+"_old_"+datetime.datetime.today().isoformat()])
                 except:

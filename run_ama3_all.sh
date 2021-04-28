@@ -22,8 +22,8 @@ probdir=problem-instances
 
 key=${1:-*}
 
-suffix=planning
-base=samples-planning
+suffix=planning_1.00
+base=samples
 taskfile=benchmark
 
 task (){
@@ -42,7 +42,7 @@ export -f task
 (
     parallel echo task \
              ::: $base/puzzle_mnist*$suffix/${key}.pddl \
-             ::: $probdir/*/latplan.puzzles.puzzle_mnist/* \
+             ::: $probdir/*/latplan.puzzles.puzzle_mnist/$suffix/* \
              ::: blind gc lama lmcut mands
 
     # parallel echo task \
@@ -57,7 +57,7 @@ export -f task
 
     parallel echo task \
              ::: $base/lightsout_digital*$suffix/${key}.pddl \
-             ::: $probdir/*/latplan.puzzles.lightsout_digital/* \
+             ::: $probdir/*/latplan.puzzles.lightsout_digital/$suffix/* \
              ::: blind gc lama lmcut mands
 
     # parallel echo task \
