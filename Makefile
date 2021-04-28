@@ -1,18 +1,18 @@
 
 .PHONY: sync
 
-target = $(HOME)/repos/papers/strips-sae/img/static/
+target = $(HOME)/latplan/img/
 
 all: 
 	parallel $(MAKE) {1}-{2}.pdf \
-		::: problem-instances problem-instances-16 problem-instances-16-korf problem-instances-ama2 \
+		::: problem-instances \
 		::: expanded evaluated generated search total total2 initialization \
                     ood-histogram-states ood-histogram-transitions
 
 sync:
 	-parallel scp -p ccc016:repos/latplan-strips/latplan/{}.csv . ::: table4 table7 table8
 	-parallel scp -p ccc016:repos/latplan-strips/latplan/{1}-{2}.csv . \
-		::: problem-instances problem-instances-16 problem-instances-16-korf problem-instances-ama2 \
+		::: problem-instances \
 		::: expanded evaluated generated search total total2 initialization \
                     coverage ood-histogram-states ood-histogram-transitions
 
